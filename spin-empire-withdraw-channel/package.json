@@ -1,0 +1,22 @@
+{
+  "name": "spin-empire-discord-activity",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "register": "node scripts/register-play-command.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "@discord/embedded-app-sdk": "^2.4.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "vite": "^6.1.0"
+  }
+}

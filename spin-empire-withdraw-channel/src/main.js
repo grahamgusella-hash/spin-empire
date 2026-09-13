@@ -1,0 +1,126 @@
+import { DiscordSDK } from '@discord/embedded-app-sdk';
+import './style.css';
+import './games.css';
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n || 0).toLocaleString();
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+let session = '', state, selected = '', busy = false, held = new Set(), lastRound = '';
+let bet = 1000, choice = 'heads', mines = 3, source = '', target = 'diamond', unresolved = null;
+$('app').innerHTML = `<aside><div class="brand"><span>♠</span><b>SPIN<span class="brand-sub">EMPIRE</span></b></div><div class="player-card"><div class="avatar">♛</div><div><b id="side-name">Connecting…</b><small>Virtual coins only</small></div></div><p class="eyebrow">THE FLOOR</p><nav><button id="all-games" class="active">▦ All games</button><button id="inventory-nav">◇ Inventory</button></nav><div class="side-note">PLAY FOR FUN<br>No real money. No cash value.</div></aside><main><header><div><p class="eyebrow">YOUR DISCORD GAME ROOM</p><h1 id="hello">Welcome to Spin Empire</h1></div><div class="balance"><small>YOUR BALANCE</small><strong>◉ <span id="balance">—</span></strong><button id="withdraw" title="Withdraw virtual coins">Withdraw</button></div></header><div class="mobile-nav"><button id="mobile-home">All games</button><button id="mobile-items">Inventory</button></div><div id="connection" role="status">Connecting to Discord…</div><div id="content"></div><footer>Virtual entertainment · Payouts include the original stake · Read the rules before playing</footer></main><div id="toast" role="status"></div>`;
+function toast(message,bad = false) { $('toast').textContent = message; $('toast').className = bad ? 'show bad' : 'show'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').className = '',5000); }
+async function api(path, body) {
+  const response = await fetch(path,{ method: body ? 'POST' : 'GET', headers: { 'Content-Type':'application/json', Authorization:`Bearer ${session}` }, ...(body ? { body:JSON.stringify(body) } : {}) });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Request failed.'); return data;
+}
+function balance() { $('balance').textContent = fmt(state.balance); }
+function button(label,action,extra = '',disabled = false) { return `<button class="action" data-action="${action}" ${extra} ${disabled ? 'disabled' : ''}>${label}</button>`; }
+function active() { return state?.round?.status === 'active'; }
+function go(id) { selected = id; held.clear(); render(); }
+$('all-games').onclick = $('mobile-home').onclick = () => go('');
+$('inventory-nav').onclick = $('mobile-items').onclick = () => go('inventory');
+function render() {
+  if (!state) return; balance();
+  $('all-games').classList.toggle('active',selected !== 'inventory'); $('inventory-nav').classList.toggle('active',selected === 'inventory');
+  if (!selected) lobby(); else if (selected === 'inventory') inventory(); else gameScreen();
+}
+function lobby() {
+  $('content').innerHTML = `<section class="lobby-banner"><div><span class="pill">12 GAMES · ONE WALLET</span><h2>Pick your next play.</h2><p>Cards, close calls, and a little luck.<br>Your game room starts here.</p></div><div class="banner-cards" aria-hidden="true"><i>♠</i><i>♥</i><i>♣</i></div></section>${active() ? `<button class="resume" id="resume">Resume your ${esc(state.games.find(g => g.id === state.round.game).name)} round →</button>` : ''}<div class="section-heading"><h2>All games</h2><span>Choose your table</span></div><div class="game-grid">${state.games.map((g,i) => `<button class="game-card hue-${i%4}" data-open="${g.id}"><span class="card-tag">${g.tag}</span><span class="large-icon">${g.icon}</span><span class="card-bottom"><b>${g.name}</b><i>↗</i></span></button>`).join('')}</div>`;
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => go(b.dataset.open)); if ($('resume')) $('resume').onclick = () => go(state.round.game);
+}
+function inventory() {
+  $('content').innerHTML = `<div class="section-heading"><h2>Your inventory</h2><span>${state.inventory.length} / 500 items</span></div><p class="muted">Open crates to collect virtual items. Sell them for coins or risk them in the Item Upgrader.</p><div class="inventory-grid">${state.inventory.map(x => `<article class="item-tile"><span style="color:${x.color}">${x.icon}</span><h3>${esc(x.name)}</h3><p>${fmt(x.value)} coins</p>${button('Sell for coins','sell',`data-item="${x.id}"`)}</article>`).join('') || '<div class="panel">No items yet. Open a crate to get started.</div>'}</div><button class="primary" id="open-crates">Open Crates →</button>`;
+  $('open-crates').onclick = () => go('crates'); wire();
+}
+function cardMarkup(c,i,canHold = false) { if (!c) return '<div class="playing-card back">♠</div>'; const rank = ({1:'A',11:'J',12:'Q',13:'K'})[c.rank] || c.rank; return `<button class="playing-card ${['♥','♦'].includes(c.suit) ? 'red-card' : ''} ${held.has(i) ? 'held' : ''}" ${canHold ? `data-hold="${i}"` : 'disabled'}><small>${rank}</small><strong>${c.suit}</strong>${canHold ? `<em>${held.has(i) ? 'HELD' : 'HOLD'}</em>` : ''}</button>`; }
+function gameScreen() {
+  const g = state.games.find(g => g.id === selected); if (!g) return;
+  const r = state.round?.game === selected ? state.round : null, running = r?.status === 'active';
+  if (r?.id !== lastRound) { held.clear(); lastRound = r?.id; }
+  const blocked = active() && !running;
+  $('content').innerHTML = `<button class="back-link" id="back">← All games</button><div class="section-heading"><div><p class="eyebrow">${g.tag}</p><h2>${g.name}</h2></div><span class="pill">VIRTUAL COINS</span></div>${blocked ? '<p class="hint">Finish your active round before starting another game.</p>' : ''}<div class="game-layout"><section class="bet-panel"><h3>Play settings</h3>${selected !== 'upgrader' && selected !== 'crates' ? `<label for="bet">BET AMOUNT</label><input id="bet" type="number" min="100" max="1000000" step="100" value="${bet}" ${running ? 'disabled' : ''}><div class="quick-bets"><button data-bet="500">500</button><button data-bet="1000">1K</button><button data-bet="10000">10K</button></div>` : ''}${settings(running)}<div class="action-list">${controls(r,blocked)}</div><p class="muted small">${running ? 'Your stake is held in this round.' : 'Outcomes and balances are calculated on the server.'}</p></section><section class="game-stage" id="stage">${board(r)}</section></div><div class="result" aria-live="polite"><b>${esc(r?.message || 'Set your play, then start a round.')}</b>${r?.status === 'done' && !['upgrader','crates'].includes(selected) ? `<span class="${r.payout >= r.bet ? 'win' : 'loss'}">Returned ${fmt(r.payout)} · Net ${fmt(r.payout-r.bet)}</span>` : running && ['mines','chicken','hilo'].includes(selected) ? `<span class="win">${r.multiplier.toFixed(2)}× · ${fmt(Math.floor(r.bet*r.multiplier))} coins</span>` : ''}</div><details class="rules"><summary>Game rules & payouts</summary><p>${esc(g.rules)}</p></details>`;
+  $('back').onclick = () => go('');
+  if ($('bet')) $('bet').oninput = e => bet = Number(e.target.value);
+  document.querySelectorAll('[data-bet]').forEach(b => { b.disabled = running; b.onclick = () => { bet = Number(b.dataset.bet); $('bet').value = bet; }; });
+  if ($('mines-count')) $('mines-count').onchange = e => mines = Number(e.target.value);
+  if ($('pick-choice')) $('pick-choice').onchange = e => choice = e.target.value;
+  for (const key of ['source','target']) if ($(key)) $(key).onchange = e => { if (key === 'source') source = e.target.value; else target = e.target.value; gameScreen(); };
+  document.querySelectorAll('[data-hold]').forEach(b => b.onclick = () => { const i = Number(b.dataset.hold); held.has(i) ? held.delete(i) : held.add(i); gameScreen(); });
+  wire(); if (selected === 'plinko' && r?.path) animatePlinko(r);
+}
+function settings(running) {
+  if (selected === 'coinflip' || selected === 'roulette') { const choices = selected === 'coinflip' ? ['heads','tails'] : ['red','black','green']; if (!choices.includes(choice)) choice = choices[0]; return `<label>CHOOSE</label><select id="pick-choice">${choices.map(x => `<option ${choice === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`; }
+  if (selected === 'mines') return `<label>MINES</label><select id="mines-count" ${running ? 'disabled' : ''}>${Array.from({length:24},(_,i) => `<option value="${i+1}" ${mines === i+1 ? 'selected' : ''}>${i+1} mines</option>`).join('')}</select>`;
+  if (selected === 'crates') return '<div class="price-tag">1,000 <small>coins / crate</small></div>';
+  if (selected === 'upgrader') { if (!state.inventory.some(x => x.id === source)) source = state.inventory[0]?.id || ''; return `<label>YOUR ITEM</label><select id="source"><option value="">Select an item</option>${state.inventory.map(x => `<option value="${x.id}" ${source === x.id ? 'selected' : ''}>${esc(x.name)} · ${fmt(x.value)}</option>`).join('')}</select><label>TARGET ITEM</label><select id="target">${state.items.map(x => `<option value="${x.key}" ${target === x.key ? 'selected' : ''}>${esc(x.name)} · ${fmt(x.value)}</option>`).join('')}</select><p class="muted small">The source item is consumed, win or lose.</p>`; }
+  return '';
+}
+function controls(r,blocked) {
+  if (r?.status !== 'active') return button(selected === 'upgrader' ? 'Attempt upgrade' : selected === 'crates' ? 'Open crate · 1,000' : 'Start round','start','',blocked || busy || (selected === 'upgrader' && !source));
+  if (selected === 'poker') return button('Draw cards','draw');
+  if (selected === 'blackjack') return button('Hit','hit') + button('Stand','stand') + button('Double','double','',r.hand.length !== 2 || state.balance < r.bet);
+  if (selected === 'craps') return button('Roll dice','roll');
+  if (selected === 'chicken') return button('Cross next lane','step') + button('Cash out','cashout','',!r.steps);
+  if (selected === 'hilo') return button('Higher ↑','higher','',r.rank === 13) + button('Lower ↓','lower','',r.rank === 1) + button('Cash out','cashout','',!r.steps);
+  if (selected === 'mines') return button('Cash out','cashout','',!r.picked.length);
+  if (selected === 'crash') return button('Cash out now','cashout'); return '';
+}
+function board(r) {
+  if (selected === 'mines') return `<p class="eyebrow">${r?.picked?.length || 0} TILES OPENED</p><div class="mine-grid">${Array.from({length:25},(_,i) => { const hit = r?.picked?.includes(i), bomb = r?.bombs?.includes(i); return `<button data-action="pick" data-tile="${i}" class="mine-tile ${hit ? 'revealed' : ''} ${bomb ? 'bomb' : ''}" ${r?.status !== 'active' || hit ? 'disabled' : ''}>${bomb ? '✹' : hit ? '◆' : '·'}</button>`; }).join('')}</div>`;
+  if (selected === 'poker' || selected === 'blackjack') return `${selected === 'blackjack' ? `<p class="eyebrow">DEALER ${r?.dealerTotal ?? ''}</p><div class="cards">${(r?.dealer || [null,null]).map((c,i) => cardMarkup(c,i)).join('')}</div>` : ''}<p class="eyebrow">${selected === 'poker' ? 'SELECT CARDS TO HOLD' : `YOUR HAND ${r?.total ?? ''}`}</p><div class="cards">${(r?.hand || Array(selected === 'poker' ? 5 : 2).fill(null)).map((c,i) => cardMarkup(c,i,selected === 'poker' && r?.status === 'active')).join('')}</div>`;
+  if (selected === 'craps') return `<p class="eyebrow">${r?.point ? `POINT: ${r.point}` : 'COME-OUT ROLL'}</p><div class="dice">${(r?.dice || [1,1]).map(n => `<span>${['⚀','⚁','⚂','⚃','⚄','⚅'][n-1]}</span>`).join('')}</div><p>Pass line · 2× return on a win</p>`;
+  if (selected === 'chicken') return `<p class="eyebrow">SAFE CROSSINGS: ${r?.steps || 0} / 15</p><div class="road">${Array.from({length:8},(_,i) => `<div class="lane ${i === ((r?.steps || 0)%8) ? 'current' : ''}">${i === ((r?.steps || 0)%8) ? '🐔' : '┆'}</div>`).join('')}</div><strong class="big-number">${(r?.multiplier || 1).toFixed(2)}×</strong><p>80% safe chance each crossing</p>`;
+  if (selected === 'hilo') return `<p class="eyebrow">ACE LOW · KING HIGH · TIES LOSE</p><div class="cards">${cardMarkup({rank:r?.rank || 1,suit:'♠'},0)}</div><p>${r?.rank ? `Higher: ${((13-r.rank)/13*100).toFixed(1)}% · Lower: ${((r.rank-1)/13*100).toFixed(1)}%` : 'Which way will the next card go?'}</p><strong class="big-number">${(r?.multiplier || 1).toFixed(2)}×</strong>`;
+  if (selected === 'crash') return `<p class="eyebrow">SOLO FLIGHT · SERVER-TIMED</p><div class="flight ${r?.status === 'active' ? 'flying' : ''}"><span>↗</span><strong class="big-number" id="crash-number">${(r?.currentX || 1).toFixed(2)}×</strong></div><p>${r?.status === 'active' ? 'Cash out before the crash.' : esc(r?.message || 'Ready for takeoff')}</p>`;
+  if (selected === 'plinko') return `<svg class="plinko" viewBox="0 0 440 340" role="img" aria-label="Plinko board"><g fill="#6d839f">${Array.from({length:12},(_,row) => Array.from({length:row+2},(_,col) => `<circle cx="${220+(col-(row+1)/2)*30}" cy="${25+row*23}" r="3"/>`).join('')).join('')}</g><circle id="plinko-ball" cx="220" cy="8" r="7" fill="#ffcf60"/></svg><div class="pockets">${state.plinko.map((n,i) => `<span class="${r?.bin === i ? 'landed' : ''}">${n}×</span>`).join('')}</div>`;
+  if (selected === 'upgrader') { const from = state.inventory.find(x => x.id === source), to = state.items.find(x => x.key === target), chance = from && to && to.value > from.value ? 95*from.value/to.value : 0; return `<div class="upgrade-stage"><div><span class="loot-icon" style="color:${from?.color || '#778'}">${from?.icon || '◇'}</span><p>${esc(from?.name || 'Choose your item')}</p></div><div class="chance-ring" style="--chance:${chance}%"><div><strong>${chance.toFixed(2)}%</strong><small>SUCCESS CHANCE</small></div></div><div><span class="loot-icon" style="color:${to?.color}">${to?.icon}</span><p>${esc(to?.name)}</p></div></div><p class="muted">Higher reward. Lower chance.</p>${r ? `<p class="${r.success ? 'win' : 'loss'}">${esc(r.message)}</p>` : ''}`; }
+  if (selected === 'crates') { const x = state.items.find(x => x.key === r?.item); return `<span class="loot-icon" style="color:${x?.color || '#ffc95e'}">${x?.icon || '▣'}</span><h2>${esc(x?.name || 'Starter Crate')}</h2><p>${x ? `${fmt(x.value)} virtual coins · In your inventory` : 'One crate. One virtual collectible.'}</p><div class="loot-table">${state.items.slice(0,5).map((x,i) => `<span style="color:${x.color}">${x.icon} ${x.name}<small>${[60,25,10,4,1][i]}%</small></span>`).join('')}</div>`; }
+  if (selected === 'coinflip') return `<div class="coin">${r?.result === 'tails' ? 'T' : 'H'}</div><h2>${r ? esc(r.result.toUpperCase()) : 'Heads or tails?'}</h2><p>50 / 50 · 2× return</p>`;
+  if (selected === 'roulette') return `<div class="roulette-wheel"><strong class="wheel-number ${r?.color || ''}">${r?.number ?? '0'}</strong></div><p>${r ? esc(r.color.toUpperCase()) : 'Single-zero European wheel'}</p>`;
+  return '';
+}
+let animatedPlinko = '';
+function animatePlinko(r) {
+  if (r.id === animatedPlinko) { $('plinko-ball').setAttribute('cx',220+(r.bin-6)*30); $('plinko-ball').setAttribute('cy',310); return; }
+  animatedPlinko = r.id; let x = 220; const frames = [{transform:'translate(0px, 0px)'}]; r.path.forEach((v,i) => { x += v ? 15 : -15; frames.push({transform:`translate(${x-220}px, ${25+i*23}px)`}); }); $('plinko-ball').animate(frames,{duration:1500,fill:'forwards',easing:'linear'});
+}
+function wire() { document.querySelectorAll('[data-action]').forEach(b => { if (busy) b.disabled = true; b.onclick = () => run(b.dataset.action,{tile:Number(b.dataset.tile || 0),itemId:b.dataset.item}); }); }
+async function run(action, extra = {}) {
+  if (busy) return; busy = true; document.querySelectorAll('[data-action]').forEach(b => b.disabled = true);
+  const r = state.round, game = action === 'sell' ? 'inventory' : selected;
+  const body = {action,bet,choice,mines,source,target,hold:[...held],roundId:r?.id,version:r?.version,...extra,requestId:crypto.randomUUID()};
+  try { Object.assign(state,await api(`/api/game/${game}`,body)); unresolved = null; if (action === 'sell') toast('Item sold for virtual coins.'); }
+  catch (e) { if (e instanceof TypeError) unresolved = {game,body}; toast(e.message,true); try { Object.assign(state,await api('/api/games')); } catch {} }
+  finally { busy = false; render(); if (unresolved) showRetry(); }
+}
+function showRetry() {
+  const warning = document.createElement('div'); warning.className = 'hint'; warning.textContent = 'Connection interrupted. Check the current balance and round. ';
+  const retry = document.createElement('button'); retry.textContent = 'Retry the same request'; warning.append(retry); $('content').prepend(warning);
+  retry.onclick = async () => { if (busy || !unresolved) return; busy = true; const {game,body} = unresolved; try { Object.assign(state,await api(`/api/game/${game}`,body)); unresolved = null; } catch (e) { toast(e.message,true); } finally { busy = false; render(); if (unresolved) showRetry(); } };
+}
+
+async function withdraw() {
+  if (busy || !state) return;
+  const raw = window.prompt(`How many coins do you want to withdraw?\nAvailable: ${fmt(state.balance)}`);
+  if (raw === null) return;
+  const amount = Math.floor(Number(String(raw).replace(/,/g,'')));
+  if (!Number.isSafeInteger(amount) || amount < 1) return toast('Enter a valid whole-number amount.', true);
+  if (amount > state.balance) return toast('You do not have enough coins.', true);
+  busy = true;
+  try {
+    const result = await api('/api/withdraw', { amount, requestId: crypto.randomUUID() });
+    if (result.user) state.balance = result.user.balance;
+    balance();
+    toast(result.message || 'Withdrawal submitted.');
+  } catch (e) { toast(e.message, true); }
+  finally { busy = false; }
+}
+$('withdraw').onclick = withdraw;
+
+async function connect() {
+  const config = await fetch('/api/config').then(r => r.json()); let profile;
+  if (config.demo && window.self === window.top) { const result = await api('/api/demo',{}); session = result.session; profile = {username:'Local preview'}; }
+  else { if (!config.clientId) throw new Error('Set DISCORD_CLIENT_ID on your server, then restart.'); const sdk = new DiscordSDK(config.clientId); await sdk.ready(); const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user; }
+  state = await api('/api/games'); $('side-name').textContent = profile.username; $('hello').textContent = `Welcome, ${profile.username}`; $('connection').textContent = config.demo ? 'LOCAL PREVIEW · Test coins only' : ''; render();
+  setInterval(async () => { if (busy || !session) return; try { const next = await api('/api/games'); if (busy) return; const changed = JSON.stringify(next.round) !== JSON.stringify(state.round) || JSON.stringify(next.inventory) !== JSON.stringify(state.inventory); Object.assign(state,next); balance(); if (changed) { render(); if (unresolved) showRetry(); } } catch {} },1000);
+}
+connect().catch(e => { $('connection').textContent = e.message; toast(e.message,true); });
