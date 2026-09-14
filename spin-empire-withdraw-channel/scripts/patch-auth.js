@@ -21,11 +21,15 @@ const replacements = [
   ],
   [
     "const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;",
-    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;"
+    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; profile = auth.user; sdk.commands.authenticate({access_token:auth.accessToken}).catch(()=>{});"
   ],
   [
     "$('connection').textContent = 'Signing in…'; auth = await api('/api/token',{code}); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;",
-    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;"
+    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; profile = auth.user; sdk.commands.authenticate({access_token:auth.accessToken}).catch(()=>{});"
+  ],
+  [
+    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;",
+    "$('connection').textContent = 'Signing in…'; auth = await Promise.race([api('/api/token',{code}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord sign-in timed out. Close Spin Empire and run /casino again.')),10000))]); session = auth.session; profile = auth.user; sdk.commands.authenticate({access_token:auth.accessToken}).catch(()=>{});"
   ],
   [
     "} state = await api('/api/games'); $('side-name').textContent = profile.username;",
@@ -46,12 +50,12 @@ for (const [from, to] of replacements) {
 }
 
 if (!source.includes("scope:['identify','guilds','applications.commands']")) throw new Error('Auth patch could not find the Discord authorize call in src/main.js.');
-if (!source.includes('const discordAuth = await sdk.commands.authenticate')) throw new Error('Auth patch could not find the Discord authenticate call in src/main.js.');
+if (!source.includes("profile = auth.user; sdk.commands.authenticate({access_token:auth.accessToken}).catch(()=>{});")) throw new Error('Non-blocking Discord authenticate patch was not applied correctly.');
 if (!source.includes('let profile, auth;') || !source.includes("Promise.race([api('/api/token',{code})")) throw new Error('Auth timeout patch was not applied correctly.');
 
 if (changed) {
   fs.writeFileSync(mainPath, source);
-  console.log('Patched Discord Activity authentication flow and timeouts.');
+  console.log('Patched Discord Activity authentication flow without blocking on SDK authenticate.');
 } else {
   console.log('Discord Activity authentication flow is already patched.');
 }
