@@ -16,12 +16,26 @@ if (source.includes("app.use(express.static(path.join(__dirname, 'dist')));")) {
 if (!source.includes("import nodeFetch from 'node-fetch';")) {
   source = source.replace("import express from 'express';", "import express from 'express';\nimport nodeFetch from 'node-fetch';");
 }
+if (!source.includes("import https from 'node:https';")) {
+  source = source.replace("import path from 'node:path';", "import path from 'node:path';\nimport https from 'node:https';");
+}
+
+if (!source.includes('const discordAgent = new https.Agent')) {
+  const insertAt = source.indexOf("app.post('/api/login-ping'");
+  const agentCode = "const discordAgent = new https.Agent({ family: 4, keepAlive: false });\n\n";
+  if (insertAt !== -1) source = source.slice(0, insertAt) + agentCode + source.slice(insertAt);
+  else {
+    const tokenAt = source.indexOf("app.post('/api/token'");
+    if (tokenAt === -1) throw new Error('Could not locate Discord token route.');
+    source = source.slice(0, tokenAt) + agentCode + source.slice(tokenAt);
+  }
+}
 
 if (!source.includes("app.post('/api/login-ping'")) {
   const insertAt = source.indexOf("app.post('/api/token'");
-  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1700' }); });\n\n" + source.slice(insertAt);
+  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1706' }); });\n\n" + source.slice(insertAt);
 } else {
-  source = source.replace(/marker:'server-[^']+'/g, "marker:'server-1700'");
+  source = source.replace(/marker:'server-[^']+'/g, "marker:'server-1706'");
 }
 
 const routeStart = source.indexOf("app.post('/api/token'");
@@ -47,7 +61,8 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
           grant_type: 'authorization_code',
           code
         }),
-        signal: controller.signal
+        signal: controller.signal,
+        agent: discordAgent
       });
     } finally {
       clearTimeout(timeout);
@@ -65,7 +80,8 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
     try {
       meResponse = await nodeFetch('https://discord.com/api/users/@me', {
         headers: { Authorization: 'Bearer ' + oauth.access_token },
-        signal: profileController.signal
+        signal: profileController.signal,
+        agent: discordAgent
       });
     } finally {
       clearTimeout(profileTimeout);
@@ -100,17 +116,12 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
 `;
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
-source = source.replace("import https from 'node:https';\n", '');
-const helperStart = source.indexOf('function discordHttpsRequest(');
-if (helperStart !== -1) {
-  const helperEnd = source.indexOf("app.post('/api/login-ping'", helperStart);
-  if (helperEnd !== -1) source = source.slice(0, helperStart) + source.slice(helperEnd);
-}
 
 if (!source.includes("import nodeFetch from 'node-fetch';")) throw new Error('node-fetch import was not applied.');
-if (!source.includes("nodeFetch('https://discord.com/api/oauth2/token'")) throw new Error('node-fetch Discord token exchange was not applied.');
-if (!source.includes("marker:'server-1700'")) throw new Error('Server marker update was not applied.');
-if (!source.includes("state: { ...gameState(user, now)")) throw new Error('Bootstrap game state is missing from login response.');
+if (!source.includes("import https from 'node:https';")) throw new Error('HTTPS import was not applied.');
+if (!source.includes('family: 4')) throw new Error('IPv4-only Discord agent was not applied.');
+if (!source.includes('agent: discordAgent')) throw new Error('Discord requests are not using the IPv4 agent.');
+if (!source.includes("marker:'server-1706'")) throw new Error('Server marker update was not applied.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched server to use Discord sample-style node-fetch OAuth exchange (server-1700).');
+console.log('Patched Discord OAuth to force IPv4 on Render (server-1706).');
