@@ -7,7 +7,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1936';
+const BUILD_MARKER = 'v0914-1944';
 const STATIC_STATE = JSON.stringify({ games:GAMES, items:ITEMS, plinko:PLINKO, plinkoTables:PLINKO_TABLES });
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
@@ -29,6 +29,12 @@ if (!response.ok || !data.ok) throw new Error(data.error || ('Spin Empire sign-i
 session = data.session;
 profile = data.user;
 state = Object.assign({}, data.state || {}, ${STATIC_STATE});
+state.games = Array.isArray(state.games) ? state.games : ${JSON.stringify(GAMES)};
+state.items = Array.isArray(state.items) ? state.items : ${JSON.stringify(ITEMS)};
+state.inventory = Array.isArray(state.inventory) ? state.inventory : [];
+state.plinko = Array.isArray(state.plinko) ? state.plinko : ${JSON.stringify(PLINKO)};
+state.plinkoTables = state.plinkoTables && typeof state.plinkoTables === 'object' ? state.plinkoTables : ${JSON.stringify(PLINKO_TABLES)};
+if (!state.round || typeof state.round !== 'object') state.round = null;
 if (data.guildId) guildId = data.guildId;
 if (!session || !profile || !state) throw new Error('Spin Empire received an incomplete login response.');
 $('connection').textContent = 'Starting Spin Empire… ${BUILD_MARKER}';`;
@@ -37,8 +43,8 @@ if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const starts = [
+    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1936';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1930';",
-    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1920';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
   ];
   let start = -1;
@@ -56,9 +62,8 @@ if (source.includes(original)) {
 const plainGamesLoad = "} state = await api('/api/games'); $('side-name').textContent = profile.username;";
 if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, "} $('side-name').textContent = profile.username;");
 
-if (!source.includes('Login data parsed… v0914-1936')) throw new Error('Parsed-login stage was not applied.');
-if (!source.includes('Object.assign({}, data.state || {}')) throw new Error('Static game catalog bootstrap was not applied.');
+if (!source.includes('state.inventory = Array.isArray(state.inventory) ? state.inventory : []')) throw new Error('Startup state normalization was not applied.');
 if (!source.includes(BUILD_MARKER)) throw new Error('Visible build marker was not applied.');
 
 fs.writeFileSync(mainPath, source);
-console.log(`Patched client to use a small login response with embedded game catalog (${BUILD_MARKER}).`);
+console.log(`Patched client with defensive startup state normalization (${BUILD_MARKER}).`);
