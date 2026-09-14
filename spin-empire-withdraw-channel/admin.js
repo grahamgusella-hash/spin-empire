@@ -10,6 +10,41 @@ SCRATCH_TYPES.silver.price = 10000000;
 SCRATCH_TYPES.gold.price = 50000000;
 SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75ddff' };
 
+const activityLaunches = new Map();
+
+export function consumeActivityLaunch(instanceId) {
+  const key = String(instanceId || '');
+  const launch = activityLaunches.get(key);
+  if (!launch) return null;
+  if (launch.expiresAt <= Date.now()) {
+    activityLaunches.delete(key);
+    return null;
+  }
+  activityLaunches.delete(key);
+  return launch;
+}
+
+function rememberActivityLaunch(instanceId, interaction) {
+  const key = String(instanceId || '');
+  if (!key) return false;
+  const launch = {
+    user: {
+      id: interaction.user.id,
+      username: interaction.user.username,
+      avatar: interaction.user.avatar,
+      bot: interaction.user.bot
+    },
+    guildId: interaction.guildId || '',
+    channelId: interaction.channelId || '',
+    expiresAt: Date.now() + 2 * 60 * 1000
+  };
+  activityLaunches.set(key, launch);
+  setTimeout(() => {
+    if (activityLaunches.get(key) === launch) activityLaunches.delete(key);
+  }, 2 * 60 * 1000).unref();
+  return true;
+}
+
 export const casinoCommand = {
   name: 'casino',
   description: 'Launch Spin Empire',
@@ -48,7 +83,13 @@ export function validateGrant(balance, amount) {
 export async function handleCasino(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'casino') return;
   try {
-    await interaction.launchActivity({ withResponse: true });
+    const response = await interaction.launchActivity({ withResponse: true });
+    const instanceId = response?.resource?.activityInstance?.id || response?.interaction?.activityInstanceId || '';
+    if (!rememberActivityLaunch(instanceId, interaction)) {
+      console.error('Spin Empire launched but Discord did not return an Activity instance ID.');
+    } else {
+      console.log(`Bound Activity instance ${instanceId} to Discord user ${interaction.user.id}.`);
+    }
   } catch (error) {
     console.error('Could not launch Spin Empire from /casino:', error?.message || error);
     if (!interaction.replied && !interaction.deferred) {
