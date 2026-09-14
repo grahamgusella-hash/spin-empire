@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "postinstall": "vite build",
+    "build": "node scripts/patch-ready.js && vite build",
+    "postinstall": "node scripts/patch-ready.js && vite build",
     "start": "node scripts/patch-server.js && node server.js",
     "dev": "node --watch server.js",
     "register": "node scripts/register-play-command.js",
