@@ -10,6 +10,14 @@ SCRATCH_TYPES.silver.price = 10000000;
 SCRATCH_TYPES.gold.price = 50000000;
 SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75ddff' };
 
+export const casinoCommand = {
+  name: 'casino',
+  description: 'Launch Spin Empire',
+  type: 1,
+  integration_types: [0],
+  contexts: [0]
+};
+
 export const adminCommand = {
   name: 'admin', description: 'Owner-only casino controls', type: 1,
   integration_types: [0], contexts: [0],
@@ -37,6 +45,21 @@ export function validateGrant(balance, amount) {
     throw new Error('Amount must be a whole number from 1 to 1,000,000,000.');
   }
   if (!Number.isSafeInteger(balance + amount)) throw new Error('This would exceed the balance limit.');
+}
+
+export async function handleCasino(interaction) {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== 'casino') return;
+  try {
+    await interaction.launchActivity();
+  } catch (error) {
+    console.error('Could not launch Spin Empire from /casino:', error?.message || error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content: 'Spin Empire could not launch from /casino. Try the App Launcher and try again in a moment.',
+        flags: MessageFlags.Ephemeral
+      }).catch(() => {});
+    }
+  }
 }
 
 export async function handleAdmin(interaction, grantCoins) {
@@ -87,22 +110,6 @@ async function readJson(response) {
   try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
 }
 
-async function removeStaleGuildCasino(client) {
-  const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
-  if (!guildId) return;
-  try {
-    const guild = await client.guilds.fetch(guildId);
-    const commands = await guild.commands.fetch();
-    const stale = [...commands.values()].filter(command => command.name === 'casino');
-    for (const command of stale) {
-      await guild.commands.delete(command.id);
-      console.log(`Deleted stale guild /casino command ${command.id}.`);
-    }
-  } catch (error) {
-    console.error('Could not remove stale guild /casino command:', error?.message || error);
-  }
-}
-
 async function registerCasinoEntryPoint(client, token) {
   const applicationId = client.application?.id || client.user?.id;
   if (!applicationId) throw new Error('Discord application ID is unavailable after login.');
@@ -112,11 +119,6 @@ async function registerCasinoEntryPoint(client, token) {
   const commands = await readJson(listResponse);
   if (!listResponse.ok) throw new Error(`Could not read global commands: ${JSON.stringify(commands)}`);
   const entryPoint = Array.isArray(commands) ? commands.find(command => command.type === 4) : null;
-  const staleGlobals = Array.isArray(commands) ? commands.filter(command => command.type === 1 && command.name === 'casino') : [];
-  for (const command of staleGlobals) {
-    const del = await fetch(`${baseUrl}/${command.id}`, { method: 'DELETE', headers });
-    if (!del.ok && del.status !== 204) console.warn('Could not delete stale global /casino command.');
-  }
   const payload = {
     name: 'casino',
     description: 'Launch Spin Empire',
@@ -133,11 +135,28 @@ async function registerCasinoEntryPoint(client, token) {
   console.log(`Registered Activity entry point /${result.name || 'casino'} (${result.id || 'unknown id'}).`);
 }
 
+async function registerGuildCasino(client) {
+  const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+  if (!guildId) return;
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const commands = await guild.commands.fetch();
+    const existing = [...commands.values()].find(command => command.name === 'casino' && command.type === 1);
+    if (existing) {
+      await guild.commands.edit(existing.id, casinoCommand);
+      console.log('Updated guild /casino launcher.');
+    } else {
+      await guild.commands.create(casinoCommand);
+      console.log('Registered guild /casino launcher.');
+    }
+  } catch (error) {
+    console.error('Could not register guild /casino launcher:', error?.message || error);
+  }
+}
+
 export async function startAdminBot(token, grantCoins, rainService) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  // Server requests should fail fast while the gateway is still connecting instead
-  // of sitting on Discord REST calls. This removes the long Activity loading stall.
   const originalGuildFetch = client.guilds.fetch.bind(client.guilds);
   client.guilds.fetch = (...args) => {
     if (!client.isReady()) return Promise.reject(new Error('Discord bot is still connecting.'));
@@ -145,6 +164,7 @@ export async function startAdminBot(token, grantCoins, rainService) {
   };
 
   client.on('interactionCreate', interaction => {
+    handleCasino(interaction).catch(() => console.error('Casino launch interaction failed.'));
     handleAdmin(interaction, grantCoins).catch(() => console.error('Admin interaction response failed. Check bot connectivity.'));
     if (rainService) handleRain(interaction, rainService).catch(() => console.error('Rain interaction response failed.'));
   });
@@ -152,7 +172,7 @@ export async function startAdminBot(token, grantCoins, rainService) {
 
   client.login(token).then(async () => {
     console.log('Admin bot connected.');
-    await removeStaleGuildCasino(client);
+    await registerGuildCasino(client);
     await registerCasinoEntryPoint(client, token).catch(error => {
       console.error('Could not register global /casino Activity entry point:', error?.message || error);
     });
