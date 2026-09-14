@@ -15,9 +15,9 @@ if (source.includes("app.use(express.static(path.join(__dirname, 'dist')));")) {
 
 if (!source.includes("app.post('/api/login-ping'")) {
   const insertAt = source.indexOf("app.post('/api/token'");
-  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1647' }); });\n\n" + source.slice(insertAt);
+  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1655' }); });\n\n" + source.slice(insertAt);
 } else {
-  source = source.replace("marker:'server-1639'", "marker:'server-1647'");
+  source = source.replace(/marker:'server-[^']+'/g, "marker:'server-1655'");
 }
 
 const routeStart = source.indexOf("app.post('/api/token'");
@@ -49,7 +49,7 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
     }
 
     const meResponse = await fetch('https://discord.com/api/users/@me', {
-      headers: { Authorization: \`Bearer \${oauth.access_token}\` },
+      headers: { Authorization: 'Bearer ' + oauth.access_token },
       signal: AbortSignal.timeout(10000)
     });
     const profile = await meResponse.json();
@@ -72,7 +72,7 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
     console.error('Discord login route failed:', error?.name || '', error?.message || error);
     const timedOut = error?.name === 'TimeoutError' || /timed out|abort/i.test(String(error?.message || ''));
     return res.status(timedOut ? 504 : 500).json({
-      error: timedOut ? 'Discord OAuth request timed out on the server.' : `Discord sign-in failed: ${error?.message || 'unknown server error'}`
+      error: timedOut ? 'Discord OAuth request timed out on the server.' : ('Discord sign-in failed: ' + (error?.message || 'unknown server error'))
     });
   }
 });
@@ -80,8 +80,6 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
 `;
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
-
-// Remove the temporary native HTTPS helper/import from earlier diagnostics if present.
 source = source.replace("import https from 'node:https';\n", '');
 const helperStart = source.indexOf('function discordHttpsRequest(');
 if (helperStart !== -1) {
@@ -90,8 +88,8 @@ if (helperStart !== -1) {
 }
 
 if (!source.includes("fetch('https://discord.com/api/oauth2/token'")) throw new Error('Official Discord token exchange was not applied.');
-if (!source.includes("marker:'server-1647'")) throw new Error('Server marker update was not applied.');
+if (!source.includes("marker:'server-1655'")) throw new Error('Server marker update was not applied.');
 if (!source.includes("state: { ...gameState(user, now)")) throw new Error('Bootstrap game state is missing from login response.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched server to Discord official Activity OAuth exchange (server-1647).');
+console.log('Patched server to Discord official Activity OAuth exchange (server-1655).');
