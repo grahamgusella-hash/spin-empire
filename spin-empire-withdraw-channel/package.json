@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/patch-auth.js && vite build",
     "postinstall": "node scripts/patch-auth.js && vite build",
-    "start": "node server.js",
+    "start": "node scripts/patch-server.js && node server.js",
     "dev": "node --watch server.js",
     "register": "node scripts/register-play-command.js",
     "test": "node --test"
