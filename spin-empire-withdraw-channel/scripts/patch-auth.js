@@ -8,6 +8,10 @@ let source = fs.readFileSync(mainPath, 'utf8');
 
 const replacements = [
   [
+    "async function connect() { const config = await fetch('/api/config').then(r => r.json()); let profile;",
+    "async function connect() { const config = await fetch('/api/config').then(r => r.json()); let profile, auth;"
+  ],
+  [
     "state:crypto.randomUUID(),prompt:'none',scope:['identify']",
     "state:'',prompt:'none',scope:['identify','guilds','applications.commands']"
   ],
@@ -17,7 +21,7 @@ const replacements = [
   ],
   [
     "const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;",
-    "$('connection').textContent = 'Signing in…'; const auth = await api('/api/token',{code}); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;"
+    "$('connection').textContent = 'Signing in…'; auth = await api('/api/token',{code}); session = auth.session; const discordAuth = await sdk.commands.authenticate({access_token:auth.accessToken}); if (!discordAuth) throw new Error('Discord login failed. Close Spin Empire and open it again.'); profile = discordAuth.user || auth.user;"
   ],
   [
     "} state = await api('/api/games'); $('side-name').textContent = profile.username;",
@@ -42,6 +46,9 @@ if (!source.includes("scope:['identify','guilds','applications.commands']")) {
 }
 if (!source.includes('const discordAuth = await sdk.commands.authenticate')) {
   throw new Error('Auth patch could not find the Discord authenticate call in src/main.js.');
+}
+if (!source.includes('let profile, auth;') || !source.includes("auth = await api('/api/token',{code})")) {
+  throw new Error('Auth bootstrap variable was not patched correctly.');
 }
 
 if (changed) {
