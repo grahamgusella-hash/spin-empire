@@ -21,7 +21,11 @@ const replacements = [
   ],
   [
     "} state = await api('/api/games'); $('side-name').textContent = profile.username;",
-    "} $('connection').textContent = 'Loading games…'; state = await api('/api/games'); $('side-name').textContent = profile.username;"
+    "} $('connection').textContent = 'Loading games…'; state = auth?.state || await Promise.race([api('/api/games'),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Game data timed out. Please reopen Spin Empire.')),8000))]); $('side-name').textContent = profile.username;"
+  ],
+  [
+    "} $('connection').textContent = 'Loading games…'; state = await api('/api/games'); $('side-name').textContent = profile.username;",
+    "} $('connection').textContent = 'Loading games…'; state = auth?.state || await Promise.race([api('/api/games'),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Game data timed out. Please reopen Spin Empire.')),8000))]); $('side-name').textContent = profile.username;"
   ]
 ];
 
