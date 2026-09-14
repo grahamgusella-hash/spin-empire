@@ -25,23 +25,17 @@ const replacements = [
   ]
 ];
 
-let changed = false;
 for (const [from,to] of replacements) {
-  if (source.includes(from)) {
-    source = source.replace(from,to);
-    changed = true;
-  }
+  if (source.includes(from)) source = source.replace(from,to);
 }
 
-// If an older startup patch added the whole game state to /api/token, remove it.
-source = source.replace(
-  "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user), state: { ...gameState(user,Date.now()), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES } });",
-  "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });"
-);
+const minimal = "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });";
+const bootstrap = "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user), state: { ...gameState(user, Date.now()), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES } });";
+if (source.includes(minimal)) source = source.replace(minimal, bootstrap);
 
 if (!source.includes("AbortSignal.timeout(8000)")) throw new Error('Could not patch Discord OAuth timeout.');
 if (!source.includes("Cache-Control','no-store")) throw new Error('Could not patch Activity cache headers.');
-if (!source.includes("res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });")) throw new Error('Could not keep token response minimal.');
+if (!source.includes("state: { ...gameState(user, Date.now())")) throw new Error('Could not add bootstrap game state to token response.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched Discord OAuth timeouts, minimal token response, and no-cache Activity assets.');
+console.log('Patched Discord OAuth timeouts, bootstrap game state, and no-cache Activity assets.');
