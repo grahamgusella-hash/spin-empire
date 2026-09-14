@@ -59,6 +59,11 @@ if (!source.includes('function discordHttpsRequest(')) {
   source = source.slice(0, insertAt) + oauthHelper + '\n' + source.slice(insertAt);
 }
 
+if (!source.includes("app.post('/api/login-ping'")) {
+  const insertAt = source.indexOf("app.post('/api/token'");
+  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1639' }); });\n\n" + source.slice(insertAt);
+}
+
 const routeStart = source.indexOf("app.post('/api/token'");
 const routeEnd = source.indexOf("app.get('/api/community'", routeStart);
 if (routeStart === -1 || routeEnd === -1) throw new Error('Could not locate Discord token route boundaries.');
@@ -120,8 +125,9 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
 
+if (!source.includes("app.post('/api/login-ping'")) throw new Error('Login ping route was not applied.');
 if (!source.includes("signal: controller.signal")) throw new Error('Hard Discord connect abort was not applied.');
 if (!source.includes("state: { ...gameState(user, now)")) throw new Error('Bootstrap game state is missing from login response.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched Discord OAuth with a hard 7-second connect/read abort and bootstrap state.');
+console.log('Patched Discord OAuth plus login reachability probe server-1639.');
