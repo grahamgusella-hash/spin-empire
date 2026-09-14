@@ -21,9 +21,9 @@ source = source.replace("import nodeFetch from 'node-fetch';\n", '');
 
 if (!source.includes("app.post('/api/login-ping'")) {
   const insertAt = source.indexOf("app.post('/api/token'");
-  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1855' }); });\n\n" + source.slice(insertAt);
+  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1904' }); });\n\n" + source.slice(insertAt);
 } else {
-  source = source.replace(/marker:'server-[^']+'/g, "marker:'server-1855'");
+  source = source.replace(/marker:'server-[^']+'/g, "marker:'server-1904'");
 }
 
 const routeStart = source.indexOf("app.post('/api/token'");
@@ -34,12 +34,13 @@ const tokenRoute = `app.post('/api/token', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const instanceId = String(req.body?.instanceId || '');
+    const guildId = String(req.body?.guildId || '');
     if (!instanceId) return res.status(400).json({ error: 'Activity instance ID is missing. Relaunch with /casino.' });
 
-    const launch = consumeActivityLaunch(instanceId);
+    const launch = consumeActivityLaunch(instanceId, guildId);
     if (!launch) {
-      console.error('No pending /casino launch matched Activity instance:', instanceId);
-      return res.status(401).json({ error: 'No matching /casino launch was found for Activity instance ' + instanceId + '. Close Spin Empire and run /casino again.' });
+      console.error('No pending /casino launch matched Activity instance/guild:', instanceId, guildId);
+      return res.status(401).json({ error: 'No recent /casino launch matched this Activity. Close Spin Empire and run /casino again.' });
     }
 
     const user = ensureUser(launch.user);
@@ -63,10 +64,10 @@ const tokenRoute = `app.post('/api/token', (req, res) => {
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
 
-if (!source.includes('consumeActivityLaunch')) throw new Error('Activity launch verifier import was not applied.');
-if (!source.includes("marker:'server-1855'")) throw new Error('Server marker update was not applied.');
+if (!source.includes('consumeActivityLaunch(instanceId, guildId)')) throw new Error('Guild-aware Activity launch verifier was not applied.');
+if (!source.includes("marker:'server-1904'")) throw new Error('Server marker update was not applied.');
 if (!source.includes('req.body?.instanceId')) throw new Error('Instance ID login route was not applied.');
 if (source.includes("discord.com/api/oauth2/token")) throw new Error('Old Discord OAuth exchange is still present.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched server with immediate Activity instance verification (server-1855).');
+console.log('Patched server with guild-aware /casino verification (server-1904).');
