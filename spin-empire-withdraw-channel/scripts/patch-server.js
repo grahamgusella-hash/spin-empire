@@ -47,12 +47,12 @@ const loginRoute = `app.get('/api/activity-login', (req, res) => {
   const guildId = String(req.query?.guildId || '');
   console.log('Activity login GET received:', instanceId, guildId);
   try {
-    if (!instanceId) return res.status(400).json({ ok:false, marker:'server-1920', error:'Activity instance ID is missing. Close Spin Empire and run /casino again.' });
+    if (!instanceId) return res.status(400).json({ ok:false, marker:'server-1930', error:'Activity instance ID is missing. Close Spin Empire and run /casino again.' });
 
     const launch = consumeActivityLaunch(instanceId, guildId);
     if (!launch) {
       console.error('No pending /casino launch matched Activity instance/guild:', instanceId, guildId);
-      return res.status(401).json({ ok:false, marker:'server-1920', error:'No recent /casino launch matched this Activity. Close Spin Empire and run /casino again.' });
+      return res.status(401).json({ ok:false, marker:'server-1930', error:'No recent /casino launch matched this Activity. Close Spin Empire and run /casino again.' });
     }
 
     const user = ensureUser(launch.user);
@@ -60,23 +60,26 @@ const loginRoute = `app.get('/api/activity-login', (req, res) => {
     sessions.set(session, user.id);
     setTimeout(() => sessions.delete(session), 12 * 60 * 60 * 1000).unref();
     const now = Date.now();
-    console.log('Activity login verified for Discord user', user.id);
-    return res.json({
+    const payload = JSON.stringify({
       ok:true,
-      marker:'server-1920',
+      marker:'server-1930',
       session,
       user: cleanUser(user),
       guildId: launch.guildId,
       state: { ...gameState(user, now), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES }
     });
+    console.log('Activity login verified for Discord user', user.id, 'response bytes', Buffer.byteLength(payload));
+    res.status(200);
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    res.set('Content-Length', String(Buffer.byteLength(payload)));
+    res.set('Connection', 'close');
+    return res.end(payload);
   } catch (error) {
     console.error('Activity launch login failed:', error?.message || error);
-    return res.status(500).json({ ok:false, marker:'server-1920', error:'Spin Empire login failed: ' + (error?.message || 'unknown error') });
+    return res.status(500).json({ ok:false, marker:'server-1930', error:'Spin Empire login failed: ' + (error?.message || 'unknown error') });
   }
 });
 
-// Old POST routes are intentionally retired so the Activity uses a simple GET that
-// bypasses request-body parsing through Discord's Activity proxy.
 app.post('/api/login-ping', (req,res) => res.status(410).json({ error:'Outdated Activity build. Close Spin Empire and run /casino again.' }));
 app.post('/api/token', (req,res) => res.status(410).json({ error:'Outdated Activity build. Close Spin Empire and run /casino again.' }));
 
@@ -85,8 +88,8 @@ app.post('/api/token', (req,res) => res.status(410).json({ error:'Outdated Activ
 source = source.slice(0, insertAt) + loginRoute + source.slice(insertAt);
 
 if (!source.includes("app.get('/api/activity-login'")) throw new Error('GET Activity login route was not applied.');
-if (!source.includes("marker:'server-1920'")) throw new Error('Server marker update was not applied.');
-if (!source.includes("req.query?.instanceId")) throw new Error('Query-string Activity login was not applied.');
+if (!source.includes("marker:'server-1930'")) throw new Error('Server marker update was not applied.');
+if (!source.includes("res.set('Content-Length'")) throw new Error('Explicit response flush was not applied.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched server to use GET Activity verification (server-1920).');
+console.log('Patched server to explicitly flush Activity login JSON (server-1930).');
