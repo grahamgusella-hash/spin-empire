@@ -42,46 +42,35 @@ try {
 }
 session = auth.session;
 profile = auth.user;
-$('connection').textContent = 'Loading game data…';`;
-
-const knownPrefixes = [
-  "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';",
-  original
-];
+state = auth.state;
+if (!state) throw new Error('Spin Empire did not receive its startup game data.');
+$('connection').textContent = 'Starting Spin Empire…';`;
 
 if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const start = source.indexOf("const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';");
   if (start !== -1) {
-    const marker = "profile = auth.user;";
+    const marker = "$('connection').textContent = 'Loading game data…';";
     const end = source.indexOf(marker, start);
     if (end === -1) throw new Error('Could not locate end of Discord login sequence.');
-    let replaceEnd = end + marker.length;
-    const after = source.slice(replaceEnd);
-    const extras = [
-      "\nif (auth.state) state = auth.state;",
-      "\n$('connection').textContent = 'Loading Spin Empire…';\n// The server has already authenticated this user with Discord and returns the initial game state.\n// Do not block startup on Discord's optional SDK authenticate RPC.\nsdk.commands.authenticate({access_token:auth.accessToken}).catch(() => {});",
-      "\n$('connection').textContent = 'Loading Spin Empire…';\n// Discord's authenticate RPC can hang in some Activity launches even after OAuth succeeds.\n// The server session above is already authenticated from the same Discord access token,\n// so do not block the game UI on this optional SDK-side handshake.\nsdk.commands.authenticate({access_token:auth.accessToken}).catch(() => {});"
-    ];
-    for (const extra of extras) {
-      if (source.startsWith(extra, replaceEnd)) replaceEnd += extra.length;
-    }
-    source = source.slice(0,start) + patched + source.slice(replaceEnd);
-  } else if (!source.includes("$('connection').textContent = 'Loading game data…';")) {
+    source = source.slice(0,start) + patched + source.slice(end + marker.length);
+  } else if (!source.includes("$('connection').textContent = 'Starting Spin Empire…';")) {
     throw new Error('Could not find Discord login sequence in src/main.js.');
   }
 }
 
 const plainGamesLoad = "} state = await api('/api/games'); $('side-name').textContent = profile.username;";
+const timedGamesLoad = "} $('connection').textContent = 'Loading game data…'; state = await Promise.race([api('/api/games'),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Game data timed out after 8 seconds.')),8000))]); $('side-name').textContent = profile.username;";
 const oldFallback = "} if (!state) { $('connection').textContent = 'Loading game data…'; state = await Promise.race([api('/api/games'),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Game data timed out after 8 seconds.')),8000))]); } $('side-name').textContent = profile.username;";
-const gamesLoadPatched = "} $('connection').textContent = 'Loading game data…'; state = await Promise.race([api('/api/games'),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Game data timed out after 8 seconds.')),8000))]); $('side-name').textContent = profile.username;";
-if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, gamesLoadPatched);
-if (source.includes(oldFallback)) source = source.replace(oldFallback, gamesLoadPatched);
+const noGamesLoad = "} $('side-name').textContent = profile.username;";
+if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, noGamesLoad);
+if (source.includes(timedGamesLoad)) source = source.replace(timedGamesLoad, noGamesLoad);
+if (source.includes(oldFallback)) source = source.replace(oldFallback, noGamesLoad);
 
-if (!source.includes("const controller = new AbortController();")) throw new Error('Login AbortController patch was not applied.');
-if (!source.includes("$('connection').textContent = 'Loading game data…'; state = await Promise.race([api('/api/games')")) throw new Error('Game data timeout patch was not applied.');
-if (source.includes('sdk.commands.authenticate({access_token:auth.accessToken})')) throw new Error('Blocking/background SDK authenticate call is still present.');
+if (!source.includes('state = auth.state;')) throw new Error('Bootstrap state patch was not applied.');
+if (source.includes("state = await api('/api/games')")) throw new Error('Blocking startup game request is still present.');
+if (source.includes('sdk.commands.authenticate({access_token:auth.accessToken})')) throw new Error('SDK authenticate call is still present.');
 
 fs.writeFileSync(mainPath, source);
-console.log('Patched Discord login with abortable token exchange and removed SDK authenticate RPC entirely.');
+console.log('Patched startup to use game state returned with Discord login and skip the second /api/games request.');
