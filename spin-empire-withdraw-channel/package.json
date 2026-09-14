@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "start": "npm run build && node server.js",
+    "start": "npm run register && npm run build && node server.js",
     "dev": "node --watch server.js",
     "register": "node scripts/register-play-command.js",
     "test": "node --test"
