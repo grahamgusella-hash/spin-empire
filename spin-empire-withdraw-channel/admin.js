@@ -12,21 +12,39 @@ SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75
 
 const activityLaunches = new Map();
 
-export function consumeActivityLaunch(instanceId) {
+export function consumeActivityLaunch(instanceId, guildId = '') {
+  const now = Date.now();
   const key = String(instanceId || '');
-  const launch = activityLaunches.get(key);
-  if (!launch) return null;
-  if (launch.expiresAt <= Date.now()) {
+  const guildKey = String(guildId || '');
+
+  const exact = activityLaunches.get(key);
+  if (exact) {
     activityLaunches.delete(key);
-    return null;
+    if (exact.expiresAt > now) return exact;
   }
-  activityLaunches.delete(key);
-  return launch;
+
+  let fallbackKey = '';
+  let fallback = null;
+  for (const [storedKey, launch] of activityLaunches.entries()) {
+    if (launch.expiresAt <= now) {
+      activityLaunches.delete(storedKey);
+      continue;
+    }
+    if (guildKey && launch.guildId === guildKey && (!fallback || launch.createdAt > fallback.createdAt)) {
+      fallbackKey = storedKey;
+      fallback = launch;
+    }
+  }
+  if (fallback) {
+    activityLaunches.delete(fallbackKey);
+    console.log(`Used recent /casino launch fallback for guild ${guildKey}; SDK instance ${key}, callback instance ${fallbackKey}.`);
+    return fallback;
+  }
+  return null;
 }
 
 function rememberActivityLaunch(instanceId, interaction) {
   const key = String(instanceId || '');
-  if (!key) return false;
   const launch = {
     user: {
       id: interaction.user.id,
@@ -36,13 +54,19 @@ function rememberActivityLaunch(instanceId, interaction) {
     },
     guildId: interaction.guildId || '',
     channelId: interaction.channelId || '',
+    createdAt: Date.now(),
     expiresAt: Date.now() + 2 * 60 * 1000
   };
-  activityLaunches.set(key, launch);
+
+  // Keep a guild-scoped pending launch even if Discord's launch callback does not expose
+  // the same instance ID as the Embedded App SDK. The server will prefer an exact ID match
+  // and otherwise consume only the newest unexpired launch from the same guild.
+  const storeKey = key || `guild:${launch.guildId}:${interaction.id}`;
+  activityLaunches.set(storeKey, launch);
   setTimeout(() => {
-    if (activityLaunches.get(key) === launch) activityLaunches.delete(key);
+    if (activityLaunches.get(storeKey) === launch) activityLaunches.delete(storeKey);
   }, 2 * 60 * 1000).unref();
-  return true;
+  return storeKey;
 }
 
 export const casinoCommand = {
@@ -92,13 +116,11 @@ export async function handleCasino(interaction) {
       response?.activityInstanceId ||
       '';
 
-    if (!rememberActivityLaunch(instanceId, interaction)) {
-      console.error('Spin Empire launched but no Activity instance ID was found in the callback response.');
-      console.error('Launch response keys:', Object.keys(response || {}));
-      console.error('Launch resource keys:', Object.keys(response?.resource || {}));
-      console.error('Launch interaction keys:', Object.keys(response?.interaction || {}));
+    const storedKey = rememberActivityLaunch(instanceId, interaction);
+    if (!instanceId) {
+      console.warn(`Spin Empire launched without a callback Activity instance ID; stored guild fallback ${storedKey}.`);
     } else {
-      console.log(`Bound Activity instance ${instanceId} to Discord user ${interaction.user.id}.`);
+      console.log(`Bound Activity launch ${storedKey} to Discord user ${interaction.user.id}.`);
     }
   } catch (error) {
     console.error('Could not launch Spin Empire from /casino:', error?.message || error);
@@ -143,7 +165,7 @@ export async function handleRain(interaction, rainService) {
       const rain = rainService.create({ id: interaction.id, guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
         amount: interaction.options.getInteger('amount', true), duration: interaction.options.getInteger('duration', true) });
       await interaction.editReply({ content: 'Rain started. No coins were taken from your balance.' });
-      await interaction.followUp({ content: `🌧️ ${rain.amount.toLocaleString()} virtual coins are raining! Use /claim before <t:${Math.floor(rain.endsAt / 1000)}:T> (<t:${Math.floor(rain.endsAt / 1000)}:R>). Everyone who claims gets an equal share when time ends.`, allowedMentions: { parse: [] } });
+      await interaction.followUp({ content: `🌧️ Rain started: ${rain.amount.toLocaleString()} virtual coins. Use /claim before <t:${Math.floor(rain.endsAt / 1000)}:T> (<t:${Math.floor(rain.endsAt / 1000)}:R>). Everyone who claims gets an equal share when time ends.`, allowedMentions: { parse: [] } });
     } else {
       await interaction.guild.members.fetch({ user: interaction.user.id, force: true });
       const rain = rainService.claim(interaction.guildId, interaction.user);
