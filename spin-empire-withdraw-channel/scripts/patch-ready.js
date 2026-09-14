@@ -6,66 +6,62 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1627';
+const BUILD_MARKER = 'v0914-1632';
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
 const patched = `const sdk = new DiscordSDK(config.clientId);
 $('connection').textContent = 'Connecting to Discord SDK… ${BUILD_MARKER}';
-await Promise.race([
-  sdk.ready(),
-  new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord SDK connection timed out after 8 seconds.')),8000))
-]);
+await sdk.ready();
 guildId = sdk.guildId || '';
 $('connection').textContent = 'Requesting Discord authorization… ${BUILD_MARKER}';
-const {code} = await Promise.race([
-  sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}),
-  new Promise((_,reject)=>setTimeout(()=>reject(new Error('Discord authorization timed out after 10 seconds.')),10000))
-]);
-let secondsLeft = 10;
-$('connection').textContent = \`Exchanging Discord login… ${BUILD_MARKER} (\${secondsLeft}s)\`;
-const countdown = setInterval(() => {
-  secondsLeft -= 1;
-  if (secondsLeft >= 0) $('connection').textContent = \`Exchanging Discord login… ${BUILD_MARKER} (\${secondsLeft}s)\`;
-},1000);
-const controller = new AbortController();
+const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']});
+$('connection').textContent = 'Exchanging Discord login… ${BUILD_MARKER}';
 let auth;
-try {
-  auth = await Promise.race([
-    (async () => {
-      const response = await fetch('/api/token', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({code}),
-        signal:controller.signal
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Discord sign-in failed.');
-      return data;
-    })(),
-    new Promise((_,reject)=>setTimeout(() => {
-      controller.abort();
-      reject(new Error('Spin Empire login server timed out after 10 seconds.'));
-    },10000))
-  ]);
-} finally {
-  clearInterval(countdown);
-}
+const response = await fetch('/api/token', {
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({code})
+});
+$('connection').textContent = 'Discord login response received… ${BUILD_MARKER}';
+const raw = await response.text();
+let data;
+try { data = raw ? JSON.parse(raw) : {}; }
+catch { throw new Error('Spin Empire received an invalid login response from the server.'); }
+if (!response.ok) throw new Error(data.error || 'Discord sign-in failed.');
+auth = data;
 session = auth.session;
 profile = auth.user;
 state = auth.state;
 if (!state) throw new Error('Spin Empire did not receive its startup game data.');
 $('connection').textContent = 'Starting Spin Empire… ${BUILD_MARKER}';`;
 
+const startPatterns = [
+  "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1627';",
+  "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
+];
+
 if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
-  const start = source.indexOf("const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';");
+  let start = -1;
+  for (const pattern of startPatterns) {
+    start = source.indexOf(pattern);
+    if (start !== -1) break;
+  }
   if (start !== -1) {
-    const marker = "$('connection').textContent = 'Loading game data…';";
-    const end = source.indexOf(marker, start);
-    if (end === -1) throw new Error('Could not locate end of Discord login sequence.');
-    source = source.slice(0,start) + patched + source.slice(end + marker.length);
-  } else if (!source.includes("$('connection').textContent = 'Starting Spin Empire…';")) {
+    const endMarker = "$('connection').textContent = 'Starting Spin Empire… v0914-1627';";
+    let end = source.indexOf(endMarker, start);
+    if (end !== -1) {
+      end += endMarker.length;
+      source = source.slice(0,start) + patched + source.slice(end);
+    } else {
+      const profileMarker = "profile = auth.user;";
+      end = source.indexOf(profileMarker, start);
+      if (end === -1) throw new Error('Could not locate end of Discord login sequence.');
+      end += profileMarker.length;
+      source = source.slice(0,start) + patched + source.slice(end);
+    }
+  } else if (!source.includes(BUILD_MARKER)) {
     throw new Error('Could not find Discord login sequence in src/main.js.');
   }
 }
@@ -84,4 +80,4 @@ if (source.includes("state = await api('/api/games')")) throw new Error('Blockin
 if (source.includes('sdk.commands.authenticate({access_token:auth.accessToken})')) throw new Error('SDK authenticate call is still present.');
 
 fs.writeFileSync(mainPath, source);
-console.log(`Patched startup with visible build marker ${BUILD_MARKER} and hard client login deadline.`);
+console.log(`Patched startup for Discord Activity timer throttling with marker ${BUILD_MARKER}.`);
