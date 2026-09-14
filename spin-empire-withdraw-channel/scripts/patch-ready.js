@@ -6,30 +6,22 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1655';
+const BUILD_MARKER = 'v0914-1718';
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
 const patched = `const sdk = new DiscordSDK(config.clientId);
 $('connection').textContent = 'Connecting to Discord SDK… ${BUILD_MARKER}';
 await sdk.ready();
 guildId = sdk.guildId || '';
-$('connection').textContent = 'Requesting Discord authorization… ${BUILD_MARKER}';
-const {code} = await sdk.commands.authorize({
-  client_id:config.clientId,
-  response_type:'code',
-  state:'',
-  prompt:'none',
-  scope:['identify','guilds','applications.commands']
-});
 $('connection').textContent = 'Checking Spin Empire server… ${BUILD_MARKER}';
 const pingResponse = await fetch('/api/login-ping', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:'{}' });
 const pingData = await pingResponse.json();
 if (!pingResponse.ok || !pingData.ok) throw new Error(pingData.error || ('Server probe failed (HTTP ' + pingResponse.status + ').'));
-$('connection').textContent = 'Server reached: ' + (pingData.marker || 'ok') + ' · exchanging Discord login… ${BUILD_MARKER}';
+$('connection').textContent = 'Server reached: ' + (pingData.marker || 'ok') + ' · verifying /casino launch… ${BUILD_MARKER}';
 const response = await fetch('/api/token', {
   method:'POST',
   headers:{'Content-Type':'application/json','Accept':'application/json'},
-  body:JSON.stringify({code})
+  body:JSON.stringify({instanceId:sdk.instanceId})
 });
 const raw = await response.text();
 let data;
@@ -38,10 +30,11 @@ catch {
   const preview = raw.replace(/\\s+/g,' ').trim().slice(0,160);
   throw new Error('Login returned HTTP ' + response.status + ', not JSON: ' + (preview || '(empty response)'));
 }
-if (!response.ok) throw new Error(data.error || ('Discord sign-in failed (HTTP ' + response.status + ').'));
+if (!response.ok) throw new Error(data.error || ('Spin Empire sign-in failed (HTTP ' + response.status + ').'));
 session = data.session;
 profile = data.user;
 state = data.state;
+if (data.guildId) guildId = data.guildId;
 if (!session || !profile || !state) throw new Error('Spin Empire received an incomplete login response.');
 $('connection').textContent = 'Starting Spin Empire… ${BUILD_MARKER}';`;
 
@@ -49,9 +42,8 @@ if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const starts = [
+    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1655';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1647';",
-    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1640';",
-    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1636';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
   ];
   let start = -1;
@@ -68,9 +60,10 @@ if (source.includes(original)) {
 
 const plainGamesLoad = "} state = await api('/api/games'); $('side-name').textContent = profile.username;";
 if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, "} $('side-name').textContent = profile.username;");
-if (!source.includes("scope:['identify','guilds','applications.commands']")) throw new Error('Official Discord Activity scopes were not applied.');
-if (!source.includes("state:''")) throw new Error('Official Discord Activity state value was not applied.');
+
+if (!source.includes('instanceId:sdk.instanceId')) throw new Error('Activity instance login was not applied.');
+if (source.includes('sdk.commands.authorize(')) throw new Error('Old Discord OAuth authorize call is still present.');
 if (!source.includes(BUILD_MARKER)) throw new Error('Visible build marker was not applied.');
 
 fs.writeFileSync(mainPath, source);
-console.log(`Patched client to Discord official Activity OAuth pattern (${BUILD_MARKER}).`);
+console.log(`Patched client to authenticate from the /casino Activity instance (${BUILD_MARKER}).`);
