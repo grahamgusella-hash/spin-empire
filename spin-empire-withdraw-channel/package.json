@@ -15,7 +15,8 @@
     "discord.js": "^14.22.1",
     "@discord/embedded-app-sdk": "^2.4.0",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "vite": "^6.1.0"
