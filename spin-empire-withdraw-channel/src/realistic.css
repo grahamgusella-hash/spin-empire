@@ -1,0 +1,240 @@
+/* Realistic casino presentation layer. Purely visual: game outcomes remain server-authoritative. */
+
+/* Shared table depth */
+.game-stage{
+  position:relative;
+  isolation:isolate;
+  border-left:1px solid #ffffff08;
+  box-shadow:inset 0 18px 55px #0006,inset 0 -20px 55px #0004;
+}
+.game-stage::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:-1;
+  background:
+    radial-gradient(circle at 50% 25%,#ffffff0b 0 2px,transparent 3px),
+    linear-gradient(115deg,transparent 0 48%,#ffffff05 50%,transparent 52% 100%);
+  background-size:34px 34px,100% 100%;
+  opacity:.45;
+}
+
+/* Poker / blackjack */
+.cards{
+  perspective:900px;
+  padding:14px 18px 24px;
+  border-radius:80px;
+  background:radial-gradient(ellipse at center,#176145 0,#0d4c36 55%,#083726 100%);
+  border:1px solid #d5b56d55;
+  box-shadow:inset 0 0 35px #0008,0 14px 28px #0005;
+}
+.playing-card{
+  transform-style:preserve-3d;
+  background:linear-gradient(145deg,#fffdf7,#e9e2d5);
+  border-color:#d6cdbd;
+  box-shadow:0 10px 18px #0006,inset 0 0 0 1px #ffffffaa;
+  transition:transform .18s ease,box-shadow .18s ease;
+}
+.playing-card:hover:not(:disabled){transform:translateY(-5px) rotateX(2deg)}
+.playing-card.held{transform:translateY(-12px);box-shadow:0 15px 24px #0008,0 0 0 2px #ffcd66}
+.playing-card.back{
+  background:
+    linear-gradient(45deg,#20305a 25%,transparent 25%,transparent 75%,#20305a 75%),
+    linear-gradient(45deg,#20305a 25%,#314b87 25%,#314b87 75%,#20305a 75%);
+  background-size:12px 12px;
+  border:5px solid #ece4d7;
+}
+
+/* Craps */
+.dice{
+  padding:24px 36px;
+  border-radius:120px;
+  background:radial-gradient(ellipse at center,#14724e,#0d4d36 72%);
+  border:2px solid #d4b66a66;
+  box-shadow:inset 0 0 35px #0008,0 14px 25px #0004;
+}
+.dice span{
+  display:grid;
+  place-items:center;
+  width:92px;
+  height:92px;
+  border-radius:15px;
+  color:#20232a;
+  background:linear-gradient(145deg,#fffdf9,#ddd6ca);
+  box-shadow:inset -6px -7px 10px #0002,inset 5px 5px 8px #fff,0 11px 18px #0006;
+  text-shadow:none;
+}
+
+/* Chicken Road */
+.road{
+  position:relative;
+  padding:14px 10px;
+  border-radius:12px;
+  background:linear-gradient(#343943,#20252b);
+  box-shadow:inset 0 0 30px #0009,0 12px 24px #0005;
+  overflow:hidden;
+}
+.road::before,.road::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;height:5px;
+  background:repeating-linear-gradient(90deg,#e8d679 0 36px,transparent 36px 65px);
+  opacity:.8;
+}
+.road::before{top:10px}.road::after{bottom:10px}
+.lane{
+  background:linear-gradient(90deg,#2a3038,#343b44);
+  border-right:3px dashed #e7e9dd77;
+  box-shadow:inset 0 0 12px #0005;
+}
+.lane.current{
+  background:radial-gradient(circle,#476c58,#2d4438);
+  text-shadow:0 3px 5px #000;
+}
+
+/* Mines */
+.mine-grid{
+  padding:14px;
+  border-radius:18px;
+  background:#101923;
+  border:1px solid #ffffff12;
+  box-shadow:inset 0 0 28px #0009,0 12px 24px #0005;
+}
+.mine-tile{
+  position:relative;
+  background:linear-gradient(145deg,#405b7d,#263b57 58%,#1b2b41);
+  border:1px solid #5f7897;
+  border-bottom:4px solid #101b2a;
+  box-shadow:inset 2px 2px 3px #ffffff16,0 4px 9px #0007;
+  transition:transform .12s ease,filter .12s ease;
+}
+.mine-tile:not(:disabled):hover{transform:translateY(-2px);filter:brightness(1.12)}
+.mine-tile.revealed{background:radial-gradient(circle,#2b8068,#174e40);border-bottom-color:#0d3028}
+.mine-tile.bomb{background:radial-gradient(circle,#b5425e,#66283a);border-bottom-color:#401522;animation:mine-pop .28s ease-out}
+@keyframes mine-pop{0%{transform:scale(.65)}70%{transform:scale(1.12)}100%{transform:scale(1)}}
+
+/* Coin flip */
+.coin{
+  position:relative;
+  border:7px ridge #e6bb55;
+  background:
+    radial-gradient(circle at 34% 29%,#fff5b8 0 7%,transparent 8%),
+    radial-gradient(circle,#f3c85c 0 47%,#c98828 48% 59%,#eabf4f 60% 68%,#9d681e 69% 100%);
+  box-shadow:inset 0 0 0 5px #7e511f88,inset 0 0 18px #fff6,0 16px 32px #0007;
+  text-shadow:0 2px 1px #ffeaa4,0 -2px 1px #784817;
+  animation:coin-settle .7s cubic-bezier(.2,.7,.2,1);
+}
+@keyframes coin-settle{0%{transform:rotateY(0) translateY(-30px)}100%{transform:rotateY(720deg) translateY(0)}}
+
+/* Roulette */
+.roulette-wheel{
+  position:relative;
+  width:250px;height:250px;
+  border:14px ridge #b69354;
+  background:repeating-conic-gradient(from -5deg,#a72f45 0deg 4.85deg,#151b22 4.85deg 9.7deg);
+  box-shadow:inset 0 0 0 10px #1d392b,inset 0 0 0 16px #bb9b5d,0 18px 38px #0008;
+  animation:roulette-settle 1.15s cubic-bezier(.15,.7,.15,1);
+}
+.roulette-wheel::before{
+  content:"";
+  position:absolute;
+  top:-22px;left:50%;
+  transform:translateX(-50%);
+  width:0;height:0;
+  border-left:10px solid transparent;border-right:10px solid transparent;border-top:18px solid #f0d383;
+  filter:drop-shadow(0 3px 2px #0008);
+}
+.wheel-number{
+  z-index:1;
+  border:7px ridge #b69354;
+  box-shadow:0 7px 20px #0009,inset 0 0 18px #0006;
+}
+@keyframes roulette-settle{0%{transform:rotate(0)}100%{transform:rotate(1080deg)}}
+
+/* Plinko */
+.plinko{
+  padding:16px 22px 4px;
+  border-radius:18px 18px 4px 4px;
+  background:linear-gradient(180deg,#202c3b,#111a25);
+  border:3px solid #a4814c;
+  box-shadow:inset 0 0 32px #0008,0 16px 30px #0006;
+}
+.plinko circle:not(#plinko-ball){filter:drop-shadow(0 2px 1px #000)}
+#plinko-ball{filter:drop-shadow(0 4px 3px #0008) drop-shadow(0 0 7px #ffd56c88)}
+.pockets{padding:0 4px 6px;background:#121a23;border:2px solid #8c6c42;border-top:0;border-radius:0 0 10px 10px}
+.pockets span{border:1px solid #ffffff10;box-shadow:inset 0 -4px 8px #0005}
+
+/* Crash */
+.flight{
+  position:relative;
+  width:min(560px,95%);
+  min-height:240px;
+  justify-content:flex-end;
+  border-left:2px solid #536b82;
+  border-bottom:2px solid #536b82;
+  background:
+    linear-gradient(#ffffff0b 1px,transparent 1px),
+    linear-gradient(90deg,#ffffff0b 1px,transparent 1px);
+  background-size:40px 40px;
+  box-shadow:inset 12px -12px 25px #0004;
+}
+.flight::after{
+  content:"";
+  position:absolute;
+  left:4%;bottom:8%;
+  width:78%;height:55%;
+  border-top:4px solid #c59bff;
+  border-radius:100% 0 0 0;
+  transform:skewY(-16deg);
+  filter:drop-shadow(0 0 7px #b77dff88);
+}
+.flight>span{position:absolute;right:14%;top:18%;z-index:1;filter:drop-shadow(0 7px 6px #0008)}
+.flight .big-number{z-index:2;background:#101923dd;padding:8px 14px;border-radius:10px}
+
+/* Crates */
+.loot-icon{
+  filter:drop-shadow(0 10px 10px #0007);
+  text-shadow:0 2px 0 #ffffff22;
+}
+.game-stage .loot-icon+ h2{letter-spacing:.02em}
+.loot-table{
+  padding:14px;
+  border-radius:12px;
+  background:#0b1521bb;
+  border:1px solid #ffffff12;
+  box-shadow:inset 0 0 20px #0005;
+}
+.loot-table>span{padding:8px 10px;border-radius:7px;background:#ffffff08}
+
+/* Item upgrader */
+.upgrade-stage{
+  padding:28px 18px;
+  border-radius:20px;
+  background:radial-gradient(circle at center,#2b2141,#141a29 64%);
+  box-shadow:inset 0 0 45px #0008,0 12px 28px #0004;
+}
+.chance-ring{
+  box-shadow:0 0 35px #61d3b433,inset 0 0 12px #0008;
+}
+.chance-ring>div{box-shadow:inset 0 0 20px #0008}
+
+/* General realism / controls */
+.bet-panel{
+  background:linear-gradient(180deg,#19283b,#101b2a);
+  box-shadow:inset -12px 0 25px #0003;
+}
+.bet-panel input,.bet-panel select{box-shadow:inset 0 3px 8px #0006}
+.action{box-shadow:0 4px 0 #5c1d38,0 8px 16px #0004;transition:transform .1s ease,filter .1s ease}
+.action:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 #5c1d38,0 4px 8px #0005}
+.big-number{text-shadow:0 4px 13px #0008}
+
+@media(max-width:760px){
+  .dice span{width:72px;height:72px}
+  .roulette-wheel{width:205px;height:205px}
+  .flight{min-height:190px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .coin,.roulette-wheel,.mine-tile.bomb{animation:none!important}
+}
