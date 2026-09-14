@@ -111,16 +111,12 @@ async function registerCasinoEntryPoint(client, token) {
   const listResponse = await fetch(baseUrl, { headers });
   const commands = await readJson(listResponse);
   if (!listResponse.ok) throw new Error(`Could not read global commands: ${JSON.stringify(commands)}`);
-
-  // There can only be one Primary Entry Point. Update it in place when it exists.
   const entryPoint = Array.isArray(commands) ? commands.find(command => command.type === 4) : null;
-  // Also remove an old global CHAT_INPUT /casino if one was ever created.
   const staleGlobals = Array.isArray(commands) ? commands.filter(command => command.type === 1 && command.name === 'casino') : [];
   for (const command of staleGlobals) {
     const del = await fetch(`${baseUrl}/${command.id}`, { method: 'DELETE', headers });
     if (!del.ok && del.status !== 204) console.warn('Could not delete stale global /casino command.');
   }
-
   const payload = {
     name: 'casino',
     description: 'Launch Spin Empire',
@@ -139,6 +135,15 @@ async function registerCasinoEntryPoint(client, token) {
 
 export async function startAdminBot(token, grantCoins, rainService) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+  // Server requests should fail fast while the gateway is still connecting instead
+  // of sitting on Discord REST calls. This removes the long Activity loading stall.
+  const originalGuildFetch = client.guilds.fetch.bind(client.guilds);
+  client.guilds.fetch = (...args) => {
+    if (!client.isReady()) return Promise.reject(new Error('Discord bot is still connecting.'));
+    return originalGuildFetch(...args);
+  };
+
   client.on('interactionCreate', interaction => {
     handleAdmin(interaction, grantCoins).catch(() => console.error('Admin interaction response failed. Check bot connectivity.'));
     if (rainService) handleRain(interaction, rainService).catch(() => console.error('Rain interaction response failed.'));
@@ -147,8 +152,6 @@ export async function startAdminBot(token, grantCoins, rainService) {
 
   client.login(token).then(async () => {
     console.log('Admin bot connected.');
-    // Remove the old normal slash command first. A normal slash command expects an
-    // interaction reply and is what causes Discord's "application did not respond" message.
     await removeStaleGuildCasino(client);
     await registerCasinoEntryPoint(client, token).catch(error => {
       console.error('Could not register global /casino Activity entry point:', error?.message || error);
