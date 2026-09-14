@@ -13,55 +13,11 @@ if (source.includes("app.use(express.static(path.join(__dirname, 'dist')));")) {
   );
 }
 
-if (!source.includes("import https from 'node:https';")) {
-  source = source.replace("import path from 'node:path';", "import path from 'node:path';\nimport https from 'node:https';");
-}
-
-const oauthHelper = `
-function discordHttpsRequest({ method = 'GET', path: requestPath, headers = {}, body = '' }) {
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(new Error('Discord request timed out.')), 7000);
-    const req = https.request({
-      hostname: 'discord.com',
-      port: 443,
-      path: requestPath,
-      method,
-      headers: { ...headers, Connection: 'close' },
-      agent: false,
-      signal: controller.signal
-    }, response => {
-      let raw = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { raw += chunk; });
-      response.on('end', () => {
-        clearTimeout(deadline);
-        let data;
-        try { data = raw ? JSON.parse(raw) : {}; }
-        catch { return reject(new Error('Discord returned an invalid response.')); }
-        resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data });
-      });
-    });
-    req.on('error', error => {
-      clearTimeout(deadline);
-      if (error?.name === 'AbortError' || controller.signal.aborted) reject(new Error('Discord request timed out.'));
-      else reject(error);
-    });
-    if (body) req.write(body);
-    req.end();
-  });
-}
-`;
-
-if (!source.includes('function discordHttpsRequest(')) {
-  const insertAt = source.indexOf("app.post('/api/token'");
-  if (insertAt === -1) throw new Error('Could not locate /api/token route.');
-  source = source.slice(0, insertAt) + oauthHelper + '\n' + source.slice(insertAt);
-}
-
 if (!source.includes("app.post('/api/login-ping'")) {
   const insertAt = source.indexOf("app.post('/api/token'");
-  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1639' }); });\n\n" + source.slice(insertAt);
+  source = source.slice(0, insertAt) + "app.post('/api/login-ping', (req,res) => { res.set('Cache-Control','no-store'); res.json({ ok:true, marker:'server-1647' }); });\n\n" + source.slice(insertAt);
+} else {
+  source = source.replace("marker:'server-1639'", "marker:'server-1647'");
 }
 
 const routeStart = source.indexOf("app.post('/api/token'");
@@ -74,37 +30,35 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
     const code = String(req.body?.code || '');
     if (!code) return res.status(400).json({ error: 'Discord authorization code is missing.' });
 
-    const form = new URLSearchParams({
-      client_id: process.env.DISCORD_CLIENT_ID || '',
-      client_secret: process.env.DISCORD_CLIENT_SECRET || '',
-      grant_type: 'authorization_code',
-      code
-    }).toString();
-
-    const tokenResult = await discordHttpsRequest({
+    const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
-      path: '/api/v10/oauth2/token',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(form)
-      },
-      body: form
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.DISCORD_CLIENT_ID || '',
+        client_secret: process.env.DISCORD_CLIENT_SECRET || '',
+        grant_type: 'authorization_code',
+        code
+      }),
+      signal: AbortSignal.timeout(10000)
     });
-    if (!tokenResult.ok || !tokenResult.data?.access_token) {
-      console.error('Discord token exchange failed:', tokenResult.status, tokenResult.data?.error || tokenResult.data?.error_description || 'unknown');
-      return res.status(401).json({ error: 'Discord authorization failed. Close Spin Empire and run /casino again.' });
+
+    const oauth = await tokenResponse.json();
+    if (!tokenResponse.ok || !oauth?.access_token) {
+      console.error('Discord token exchange failed:', tokenResponse.status, oauth?.error || oauth?.error_description || 'unknown');
+      return res.status(401).json({ error: 'Discord authorization failed. Verify the Discord Client ID/Secret and relaunch /casino.' });
     }
 
-    const meResult = await discordHttpsRequest({
-      path: '/api/v10/users/@me',
-      headers: { Authorization: \`Bearer \${tokenResult.data.access_token}\` }
+    const meResponse = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: \`Bearer \${oauth.access_token}\` },
+      signal: AbortSignal.timeout(10000)
     });
-    if (!meResult.ok || !meResult.data?.id) {
-      console.error('Discord profile lookup failed:', meResult.status);
+    const profile = await meResponse.json();
+    if (!meResponse.ok || !profile?.id) {
+      console.error('Discord profile lookup failed:', meResponse.status);
       return res.status(401).json({ error: 'Could not read your Discord profile.' });
     }
 
-    const user = ensureUser(meResult.data);
+    const user = ensureUser(profile);
     const session = crypto.randomBytes(32).toString('hex');
     sessions.set(session, user.id);
     setTimeout(() => sessions.delete(session), 12 * 60 * 60 * 1000).unref();
@@ -115,9 +69,11 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
       state: { ...gameState(user, now), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES }
     });
   } catch (error) {
-    console.error('Discord login route failed:', error?.message || error);
-    const timedOut = /timed out|abort/i.test(String(error?.message || error?.name || ''));
-    if (!res.headersSent) return res.status(timedOut ? 504 : 500).json({ error: timedOut ? 'Discord login timed out while Render was connecting to Discord.' : 'Discord sign-in failed. Please try /casino again.' });
+    console.error('Discord login route failed:', error?.name || '', error?.message || error);
+    const timedOut = error?.name === 'TimeoutError' || /timed out|abort/i.test(String(error?.message || ''));
+    return res.status(timedOut ? 504 : 500).json({
+      error: timedOut ? 'Discord OAuth request timed out on the server.' : `Discord sign-in failed: ${error?.message || 'unknown server error'}`
+    });
   }
 });
 
@@ -125,9 +81,17 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
 
-if (!source.includes("app.post('/api/login-ping'")) throw new Error('Login ping route was not applied.');
-if (!source.includes("signal: controller.signal")) throw new Error('Hard Discord connect abort was not applied.');
+// Remove the temporary native HTTPS helper/import from earlier diagnostics if present.
+source = source.replace("import https from 'node:https';\n", '');
+const helperStart = source.indexOf('function discordHttpsRequest(');
+if (helperStart !== -1) {
+  const helperEnd = source.indexOf("app.post('/api/login-ping'", helperStart);
+  if (helperEnd !== -1) source = source.slice(0, helperStart) + source.slice(helperEnd);
+}
+
+if (!source.includes("fetch('https://discord.com/api/oauth2/token'")) throw new Error('Official Discord token exchange was not applied.');
+if (!source.includes("marker:'server-1647'")) throw new Error('Server marker update was not applied.');
 if (!source.includes("state: { ...gameState(user, now)")) throw new Error('Bootstrap game state is missing from login response.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched Discord OAuth plus login reachability probe server-1639.');
+console.log('Patched server to Discord official Activity OAuth exchange (server-1647).');
