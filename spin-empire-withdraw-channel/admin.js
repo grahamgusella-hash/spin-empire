@@ -1,8 +1,6 @@
 import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { CRATE_TYPES, SCRATCH_TYPES } from './games.js';
 
-// Spin Empire high-tier virtual pricing. Keeping this in the shared server module
-// makes the server authoritative even if a browser tries to submit a cheaper price.
 CRATE_TYPES.starter.price = 1000000;
 CRATE_TYPES.miner.price = 10000000;
 CRATE_TYPES.royal.price = 50000000;
@@ -11,6 +9,12 @@ SCRATCH_TYPES.bronze.price = 1000000;
 SCRATCH_TYPES.silver.price = 10000000;
 SCRATCH_TYPES.gold.price = 50000000;
 SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75ddff' };
+
+export const casinoCommand = {
+  name: 'casino',
+  description: 'Launch Spin Empire',
+  type: 1
+};
 
 export const adminCommand = {
   name: 'admin', description: 'Owner-only casino controls', type: 1,
@@ -39,6 +43,18 @@ export function validateGrant(balance, amount) {
     throw new Error('Amount must be a whole number from 1 to 1,000,000,000.');
   }
   if (!Number.isSafeInteger(balance + amount)) throw new Error('This would exceed the balance limit.');
+}
+
+export async function handleCasino(interaction) {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== 'casino') return;
+  try {
+    await interaction.launchActivity();
+  } catch (error) {
+    console.error('Could not launch Spin Empire from /casino:', error?.message || error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Spin Empire could not launch. Try the App Launcher while the command refreshes.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+  }
 }
 
 export async function handleAdmin(interaction, grantCoins) {
@@ -87,11 +103,26 @@ export async function handleRain(interaction, rainService) {
 export async function startAdminBot(token, grantCoins, rainService) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   client.on('interactionCreate', interaction => {
+    handleCasino(interaction).catch(() => console.error('Casino launch interaction failed.'));
     handleAdmin(interaction, grantCoins).catch(() => console.error('Admin interaction response failed. Check bot connectivity.'));
     if (rainService) handleRain(interaction, rainService).catch(() => console.error('Rain interaction response failed.'));
   });
   client.on('error', () => console.error('Discord connection error.'));
   await client.login(token);
+
+  const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+  if (guildId) {
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      await guild.commands.create(casinoCommand);
+      console.log('Registered /casino Activity launcher in configured server.');
+    } catch (error) {
+      console.error('Could not register /casino:', error?.message || error);
+    }
+  } else {
+    console.warn('DISCORD_GUILD_ID is missing: /casino could not be registered as a guild slash command.');
+  }
+
   if (client.user.username !== 'Spin Empire') {
     try { await client.user.setUsername('Spin Empire'); }
     catch { console.warn('Could not rename the bot to Spin Empire. Set its username in the Discord Developer Portal.'); }
