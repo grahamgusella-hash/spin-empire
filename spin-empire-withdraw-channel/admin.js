@@ -1,4 +1,16 @@
 import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { CRATE_TYPES, SCRATCH_TYPES } from './games.js';
+
+// Spin Empire high-tier virtual pricing. Keeping this in the shared server module
+// makes the server authoritative even if a browser tries to submit a cheaper price.
+CRATE_TYPES.starter.price = 1000000;
+CRATE_TYPES.miner.price = 10000000;
+CRATE_TYPES.royal.price = 50000000;
+CRATE_TYPES.mythic.price = 75000000;
+SCRATCH_TYPES.bronze.price = 1000000;
+SCRATCH_TYPES.silver.price = 10000000;
+SCRATCH_TYPES.gold.price = 50000000;
+SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75ddff' };
 
 export const adminCommand = {
   name: 'admin', description: 'Owner-only casino controls', type: 1,
@@ -35,7 +47,6 @@ export async function handleAdmin(interaction, grantCoins) {
   try {
     if (!interaction.inGuild() || !interaction.guild) throw new Error('Use this command in the Discord server, not a DM.');
     if (interaction.options.getSubcommand() !== 'give') throw new Error('Unknown admin command.');
-    // Fetch current roles and membership; do not trust a stale cache or administrator status.
     const roles = await interaction.guild.roles.fetch();
     const member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true });
     if (!hasOwnerRole([...member.roles.cache.keys()], [...roles.values()])) {
