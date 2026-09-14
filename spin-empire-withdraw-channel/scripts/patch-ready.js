@@ -6,7 +6,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1647';
+const BUILD_MARKER = 'v0914-1655';
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
 const patched = `const sdk = new DiscordSDK(config.clientId);
@@ -24,8 +24,8 @@ const {code} = await sdk.commands.authorize({
 $('connection').textContent = 'Checking Spin Empire server… ${BUILD_MARKER}';
 const pingResponse = await fetch('/api/login-ping', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:'{}' });
 const pingData = await pingResponse.json();
-if (!pingResponse.ok || !pingData.ok) throw new Error(pingData.error || `Server probe failed (HTTP ${pingResponse.status}).`);
-$('connection').textContent = `Server reached: ${pingData.marker || 'ok'} · exchanging Discord login… ${BUILD_MARKER}`;
+if (!pingResponse.ok || !pingData.ok) throw new Error(pingData.error || ('Server probe failed (HTTP ' + pingResponse.status + ').'));
+$('connection').textContent = 'Server reached: ' + (pingData.marker || 'ok') + ' · exchanging Discord login… ${BUILD_MARKER}';
 const response = await fetch('/api/token', {
   method:'POST',
   headers:{'Content-Type':'application/json','Accept':'application/json'},
@@ -36,9 +36,9 @@ let data;
 try { data = raw ? JSON.parse(raw) : {}; }
 catch {
   const preview = raw.replace(/\\s+/g,' ').trim().slice(0,160);
-  throw new Error(`Login returned HTTP ${response.status}, not JSON: ${preview || '(empty response)'}`);
+  throw new Error('Login returned HTTP ' + response.status + ', not JSON: ' + (preview || '(empty response)'));
 }
-if (!response.ok) throw new Error(data.error || `Discord sign-in failed (HTTP ${response.status}).`);
+if (!response.ok) throw new Error(data.error || ('Discord sign-in failed (HTTP ' + response.status + ').'));
 session = data.session;
 profile = data.user;
 state = data.state;
@@ -49,6 +49,7 @@ if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const starts = [
+    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1647';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1640';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1636';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
