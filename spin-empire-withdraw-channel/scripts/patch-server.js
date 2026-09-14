@@ -8,10 +8,6 @@ let source = fs.readFileSync(serverPath, 'utf8');
 
 const replacements = [
   [
-    "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });",
-    "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user), state: { ...gameState(user,Date.now()), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES } });"
-  ],
-  [
     "const response = await fetch('https://discord.com/api/oauth2/token', {",
     "const response = await fetch('https://discord.com/api/oauth2/token', { signal: AbortSignal.timeout(8000),"
   ],
@@ -37,13 +33,15 @@ for (const [from,to] of replacements) {
   }
 }
 
-if (!source.includes('state: { ...gameState(user,Date.now())')) throw new Error('Could not patch login bootstrap state.');
+// If an older startup patch added the whole game state to /api/token, remove it.
+source = source.replace(
+  "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user), state: { ...gameState(user,Date.now()), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES } });",
+  "res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });"
+);
+
 if (!source.includes("AbortSignal.timeout(8000)")) throw new Error('Could not patch Discord OAuth timeout.');
 if (!source.includes("Cache-Control','no-store")) throw new Error('Could not patch Activity cache headers.');
+if (!source.includes("res.json({ session, accessToken: oauth.access_token, user: cleanUser(user) });")) throw new Error('Could not keep token response minimal.');
 
-if (changed) {
-  fs.writeFileSync(serverPath, source);
-  console.log('Patched login bootstrap, OAuth timeouts, and no-cache Activity assets.');
-} else {
-  console.log('Server login/cache patches are already applied.');
-}
+fs.writeFileSync(serverPath, source);
+console.log('Patched Discord OAuth timeouts, minimal token response, and no-cache Activity assets.');
