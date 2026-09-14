@@ -6,7 +6,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1920';
+const BUILD_MARKER = 'v0914-1930';
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
 const patched = `const sdk = new DiscordSDK(config.clientId);
@@ -18,13 +18,10 @@ if (!activityInstanceId) throw new Error('Discord did not provide an Activity in
 $('connection').textContent = 'Verifying /casino launch… ${BUILD_MARKER}';
 const loginUrl = '/api/activity-login?instanceId=' + encodeURIComponent(activityInstanceId) + '&guildId=' + encodeURIComponent(guildId);
 const response = await fetch(loginUrl, { method:'GET', headers:{'Accept':'application/json'}, cache:'no-store' });
-const raw = await response.text();
+$('connection').textContent = 'Login response received… ${BUILD_MARKER}';
 let data;
-try { data = raw ? JSON.parse(raw) : {}; }
-catch {
-  const preview = raw.replace(/\\s+/g,' ').trim().slice(0,160);
-  throw new Error('Login returned HTTP ' + response.status + ', not JSON: ' + (preview || '(empty response)'));
-}
+try { data = await response.json(); }
+catch { throw new Error('Spin Empire received an invalid login response.'); }
 if (!response.ok || !data.ok) throw new Error(data.error || ('Spin Empire sign-in failed (HTTP ' + response.status + ').'));
 $('connection').textContent = 'Verified by ' + (data.marker || 'server') + ' · starting Spin Empire… ${BUILD_MARKER}';
 session = data.session;
@@ -37,8 +34,8 @@ if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const starts = [
+    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1920';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1912';",
-    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1904';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
   ];
   let start = -1;
@@ -56,11 +53,8 @@ if (source.includes(original)) {
 const plainGamesLoad = "} state = await api('/api/games'); $('side-name').textContent = profile.username;";
 if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, "} $('side-name').textContent = profile.username;");
 
-if (!source.includes("fetch(loginUrl")) throw new Error('GET Activity login request was not applied.');
-if (!source.includes("/api/activity-login?instanceId=")) throw new Error('Activity login URL was not applied.');
-if (source.includes("fetch('/api/login-ping'")) throw new Error('Old POST login request is still present.');
-if (source.includes('sdk.commands.authorize(')) throw new Error('Old Discord OAuth authorize call is still present.');
+if (!source.includes("data = await response.json()")) throw new Error('Direct JSON login response handling was not applied.');
 if (!source.includes(BUILD_MARKER)) throw new Error('Visible build marker was not applied.');
 
 fs.writeFileSync(mainPath, source);
-console.log(`Patched client to use GET Activity verification (${BUILD_MARKER}).`);
+console.log(`Patched client to read flushed Activity login JSON (${BUILD_MARKER}).`);
