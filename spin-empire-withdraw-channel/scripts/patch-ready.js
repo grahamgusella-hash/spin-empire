@@ -6,7 +6,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainPath = path.join(here, '..', 'src', 'main.js');
 let source = fs.readFileSync(mainPath, 'utf8');
 
-const BUILD_MARKER = 'v0914-1912';
+const BUILD_MARKER = 'v0914-1920';
 const original = "const sdk = new DiscordSDK(config.clientId); await sdk.ready(); guildId = sdk.guildId || ''; const {code} = await sdk.commands.authorize({client_id:config.clientId,response_type:'code',state:crypto.randomUUID(),prompt:'none',scope:['identify']}); const auth = await api('/api/token',{code}); session = auth.session; await sdk.commands.authenticate({access_token:auth.accessToken}); profile = auth.user;";
 
 const patched = `const sdk = new DiscordSDK(config.clientId);
@@ -16,11 +16,8 @@ guildId = sdk.guildId || '';
 const activityInstanceId = String(sdk.instanceId || '');
 if (!activityInstanceId) throw new Error('Discord did not provide an Activity instance ID. Close Spin Empire and run /casino again.');
 $('connection').textContent = 'Verifying /casino launch… ${BUILD_MARKER}';
-const response = await fetch('/api/login-ping', {
-  method:'POST',
-  headers:{'Content-Type':'application/json','Accept':'application/json'},
-  body:JSON.stringify({instanceId:activityInstanceId,guildId})
-});
+const loginUrl = '/api/activity-login?instanceId=' + encodeURIComponent(activityInstanceId) + '&guildId=' + encodeURIComponent(guildId);
+const response = await fetch(loginUrl, { method:'GET', headers:{'Accept':'application/json'}, cache:'no-store' });
 const raw = await response.text();
 let data;
 try { data = raw ? JSON.parse(raw) : {}; }
@@ -40,8 +37,8 @@ if (source.includes(original)) {
   source = source.replace(original, patched);
 } else {
   const starts = [
+    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1912';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1904';",
-    "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK… v0914-1855';",
     "const sdk = new DiscordSDK(config.clientId);\n$('connection').textContent = 'Connecting to Discord SDK…';"
   ];
   let start = -1;
@@ -59,10 +56,11 @@ if (source.includes(original)) {
 const plainGamesLoad = "} state = await api('/api/games'); $('side-name').textContent = profile.username;";
 if (source.includes(plainGamesLoad)) source = source.replace(plainGamesLoad, "} $('side-name').textContent = profile.username;");
 
-if (!source.includes("fetch('/api/login-ping'")) throw new Error('Combined Activity login request was not applied.');
-if (source.includes("fetch('/api/token'")) throw new Error('Old second login request is still present.');
+if (!source.includes("fetch(loginUrl")) throw new Error('GET Activity login request was not applied.');
+if (!source.includes("/api/activity-login?instanceId=")) throw new Error('Activity login URL was not applied.');
+if (source.includes("fetch('/api/login-ping'")) throw new Error('Old POST login request is still present.');
 if (source.includes('sdk.commands.authorize(')) throw new Error('Old Discord OAuth authorize call is still present.');
 if (!source.includes(BUILD_MARKER)) throw new Error('Visible build marker was not applied.');
 
 fs.writeFileSync(mainPath, source);
-console.log(`Patched client to use one Activity login request (${BUILD_MARKER}).`);
+console.log(`Patched client to use GET Activity verification (${BUILD_MARKER}).`);
