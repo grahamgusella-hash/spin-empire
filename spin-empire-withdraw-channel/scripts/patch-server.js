@@ -6,7 +6,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(here, '..', 'server.js');
 let source = fs.readFileSync(serverPath, 'utf8');
 
-// Keep Activity assets fresh inside Discord's iframe/proxy.
 if (source.includes("app.use(express.static(path.join(__dirname, 'dist')));")) {
   source = source.replace(
     "app.use(express.static(path.join(__dirname, 'dist')));",
@@ -14,8 +13,6 @@ if (source.includes("app.use(express.static(path.join(__dirname, 'dist')));")) {
   );
 }
 
-// Add Node's native HTTPS client. Using an explicit socket/request timeout avoids an
-// occasional undici/fetch stall on the Render -> Discord OAuth connection.
 if (!source.includes("import https from 'node:https';")) {
   source = source.replace("import path from 'node:path';", "import path from 'node:path';\nimport https from 'node:https';");
 }
@@ -23,26 +20,33 @@ if (!source.includes("import https from 'node:https';")) {
 const oauthHelper = `
 function discordHttpsRequest({ method = 'GET', path: requestPath, headers = {}, body = '' }) {
   return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(new Error('Discord request timed out.')), 7000);
     const req = https.request({
       hostname: 'discord.com',
       port: 443,
       path: requestPath,
       method,
       headers: { ...headers, Connection: 'close' },
-      agent: false
+      agent: false,
+      signal: controller.signal
     }, response => {
       let raw = '';
       response.setEncoding('utf8');
       response.on('data', chunk => { raw += chunk; });
       response.on('end', () => {
+        clearTimeout(deadline);
         let data;
         try { data = raw ? JSON.parse(raw) : {}; }
         catch { return reject(new Error('Discord returned an invalid response.')); }
         resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data });
       });
     });
-    req.setTimeout(7000, () => req.destroy(new Error('Discord request timed out.')));
-    req.on('error', reject);
+    req.on('error', error => {
+      clearTimeout(deadline);
+      if (error?.name === 'AbortError' || controller.signal.aborted) reject(new Error('Discord request timed out.'));
+      else reject(error);
+    });
     if (body) req.write(body);
     req.end();
   });
@@ -60,6 +64,7 @@ const routeEnd = source.indexOf("app.get('/api/community'", routeStart);
 if (routeStart === -1 || routeEnd === -1) throw new Error('Could not locate Discord token route boundaries.');
 
 const tokenRoute = `app.post('/api/token', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const code = String(req.body?.code || '');
     if (!code) return res.status(400).json({ error: 'Discord authorization code is missing.' });
@@ -99,15 +104,15 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
     sessions.set(session, user.id);
     setTimeout(() => sessions.delete(session), 12 * 60 * 60 * 1000).unref();
     const now = Date.now();
-    res.json({
+    return res.json({
       session,
       user: cleanUser(user),
       state: { ...gameState(user, now), games: GAMES, items: ITEMS, plinko: PLINKO, plinkoTables: PLINKO_TABLES }
     });
   } catch (error) {
     console.error('Discord login route failed:', error?.message || error);
-    const timedOut = /timed out/i.test(String(error?.message || ''));
-    res.status(timedOut ? 504 : 500).json({ error: timedOut ? 'Discord login timed out. Close Spin Empire and run /casino again.' : 'Discord sign-in failed. Please try /casino again.' });
+    const timedOut = /timed out|abort/i.test(String(error?.message || error?.name || ''));
+    if (!res.headersSent) return res.status(timedOut ? 504 : 500).json({ error: timedOut ? 'Discord login timed out while Render was connecting to Discord.' : 'Discord sign-in failed. Please try /casino again.' });
   }
 });
 
@@ -115,9 +120,8 @@ const tokenRoute = `app.post('/api/token', async (req, res) => {
 
 source = source.slice(0, routeStart) + tokenRoute + source.slice(routeEnd);
 
-if (!source.includes("path: '/api/v10/oauth2/token'")) throw new Error('Native Discord OAuth route patch failed.');
-if (!source.includes("req.setTimeout(7000")) throw new Error('Discord HTTPS timeout patch failed.');
+if (!source.includes("signal: controller.signal")) throw new Error('Hard Discord connect abort was not applied.');
 if (!source.includes("state: { ...gameState(user, now)")) throw new Error('Bootstrap game state is missing from login response.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched Discord OAuth to native HTTPS with hard timeouts and bootstrap game state.');
+console.log('Patched Discord OAuth with a hard 7-second connect/read abort and bootstrap state.');
