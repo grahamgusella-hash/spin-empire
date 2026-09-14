@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/patch-ready.js && vite build",
     "postinstall": "node scripts/patch-ready.js && vite build",
-    "start": "node scripts/patch-server.js && node server.js",
+    "start": "node scripts/ensure-casino-command.js; node scripts/patch-server.js && node server.js",
     "dev": "node --watch server.js",
     "register": "node scripts/register-play-command.js",
     "test": "node --test"
