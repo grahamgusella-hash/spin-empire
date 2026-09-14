@@ -82,20 +82,45 @@ export async function handleRain(interaction, rainService) {
   }
 }
 
+async function readJson(response) {
+  const text = await response.text();
+  try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+}
+
+async function removeStaleGuildCasino(client) {
+  const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+  if (!guildId) return;
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const commands = await guild.commands.fetch();
+    const stale = [...commands.values()].filter(command => command.name === 'casino');
+    for (const command of stale) {
+      await guild.commands.delete(command.id);
+      console.log(`Deleted stale guild /casino command ${command.id}.`);
+    }
+  } catch (error) {
+    console.error('Could not remove stale guild /casino command:', error?.message || error);
+  }
+}
+
 async function registerCasinoEntryPoint(client, token) {
   const applicationId = client.application?.id || client.user?.id;
   if (!applicationId) throw new Error('Discord application ID is unavailable after login.');
-
-  const headers = {
-    Authorization: `Bot ${token}`,
-    'Content-Type': 'application/json'
-  };
+  const headers = { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' };
   const baseUrl = `https://discord.com/api/v10/applications/${applicationId}/commands`;
   const listResponse = await fetch(baseUrl, { headers });
-  const commands = await listResponse.json();
+  const commands = await readJson(listResponse);
   if (!listResponse.ok) throw new Error(`Could not read global commands: ${JSON.stringify(commands)}`);
 
-  const existingEntryPoint = Array.isArray(commands) ? commands.find(command => command.type === 4) : null;
+  // There can only be one Primary Entry Point. Update it in place when it exists.
+  const entryPoint = Array.isArray(commands) ? commands.find(command => command.type === 4) : null;
+  // Also remove an old global CHAT_INPUT /casino if one was ever created.
+  const staleGlobals = Array.isArray(commands) ? commands.filter(command => command.type === 1 && command.name === 'casino') : [];
+  for (const command of staleGlobals) {
+    const del = await fetch(`${baseUrl}/${command.id}`, { method: 'DELETE', headers });
+    if (!del.ok && del.status !== 204) console.warn('Could not delete stale global /casino command.');
+  }
+
   const payload = {
     name: 'casino',
     description: 'Launch Spin Empire',
@@ -104,15 +129,12 @@ async function registerCasinoEntryPoint(client, token) {
     integration_types: [0, 1],
     contexts: [0, 1, 2]
   };
-
-  const response = await fetch(existingEntryPoint ? `${baseUrl}/${existingEntryPoint.id}` : baseUrl, {
-    method: existingEntryPoint ? 'PATCH' : 'POST',
-    headers,
-    body: JSON.stringify(payload)
+  const response = await fetch(entryPoint ? `${baseUrl}/${entryPoint.id}` : baseUrl, {
+    method: entryPoint ? 'PATCH' : 'POST', headers, body: JSON.stringify(payload)
   });
-  const result = await response.json();
-  if (!response.ok) throw new Error(`Discord rejected /casino: ${JSON.stringify(result)}`);
-  console.log('Registered global /casino Activity entry point.');
+  const result = await readJson(response);
+  if (!response.ok) throw new Error(`Discord rejected Activity entry point: ${JSON.stringify(result)}`);
+  console.log(`Registered Activity entry point /${result.name || 'casino'} (${result.id || 'unknown id'}).`);
 }
 
 export async function startAdminBot(token, grantCoins, rainService) {
@@ -121,23 +143,21 @@ export async function startAdminBot(token, grantCoins, rainService) {
     handleAdmin(interaction, grantCoins).catch(() => console.error('Admin interaction response failed. Check bot connectivity.'));
     if (rainService) handleRain(interaction, rainService).catch(() => console.error('Rain interaction response failed.'));
   });
-  client.on('error', () => console.error('Discord connection error.'));
+  client.on('error', error => console.error('Discord connection error:', error?.message || error));
 
-  // Do not block the web server while Discord connects. This keeps the Activity responsive
-  // even if the Discord gateway or command API is slow.
   client.login(token).then(async () => {
     console.log('Admin bot connected.');
-    registerCasinoEntryPoint(client, token).catch(error => {
+    // Remove the old normal slash command first. A normal slash command expects an
+    // interaction reply and is what causes Discord's "application did not respond" message.
+    await removeStaleGuildCasino(client);
+    await registerCasinoEntryPoint(client, token).catch(error => {
       console.error('Could not register global /casino Activity entry point:', error?.message || error);
     });
-
     if (client.user.username !== 'Spin Empire') {
       try { await client.user.setUsername('Spin Empire'); }
       catch { console.warn('Could not rename the bot to Spin Empire. Set its username in the Discord Developer Portal.'); }
     }
-  }).catch(error => {
-    console.error('Discord bot login failed:', error?.message || error);
-  });
+  }).catch(error => console.error('Discord bot login failed:', error?.message || error));
 
   return client;
 }
