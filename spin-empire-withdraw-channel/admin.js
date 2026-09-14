@@ -13,9 +13,7 @@ SCRATCH_TYPES.diamond = { name: 'Diamond Scratch', price: 75000000, accent: '#75
 export const casinoCommand = {
   name: 'casino',
   description: 'Launch Spin Empire',
-  type: 1,
-  integration_types: [0],
-  contexts: [0]
+  type: 1
 };
 
 export const adminCommand = {
@@ -50,12 +48,12 @@ export function validateGrant(balance, amount) {
 export async function handleCasino(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'casino') return;
   try {
-    await interaction.launchActivity();
+    await interaction.launchActivity({ withResponse: true });
   } catch (error) {
     console.error('Could not launch Spin Empire from /casino:', error?.message || error);
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: 'Spin Empire could not launch from /casino. Try the App Launcher and try again in a moment.',
+        content: 'Spin Empire could not launch from /casino. Try the App Launcher while this command refreshes.',
         flags: MessageFlags.Ephemeral
       }).catch(() => {});
     }
@@ -105,66 +103,33 @@ export async function handleRain(interaction, rainService) {
   }
 }
 
-async function readJson(response) {
-  const text = await response.text();
-  try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
-}
-
-async function registerCasinoEntryPoint(client, token) {
-  const applicationId = client.application?.id || client.user?.id;
-  if (!applicationId) throw new Error('Discord application ID is unavailable after login.');
-  const headers = { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' };
-  const baseUrl = `https://discord.com/api/v10/applications/${applicationId}/commands`;
-  const listResponse = await fetch(baseUrl, { headers });
-  const commands = await readJson(listResponse);
-  if (!listResponse.ok) throw new Error(`Could not read global commands: ${JSON.stringify(commands)}`);
-  const entryPoint = Array.isArray(commands) ? commands.find(command => command.type === 4) : null;
-  const payload = {
-    name: 'casino',
-    description: 'Launch Spin Empire',
-    type: 4,
-    handler: 2,
-    integration_types: [0, 1],
-    contexts: [0, 1, 2]
-  };
-  const response = await fetch(entryPoint ? `${baseUrl}/${entryPoint.id}` : baseUrl, {
-    method: entryPoint ? 'PATCH' : 'POST', headers, body: JSON.stringify(payload)
-  });
-  const result = await readJson(response);
-  if (!response.ok) throw new Error(`Discord rejected Activity entry point: ${JSON.stringify(result)}`);
-  console.log(`Registered Activity entry point /${result.name || 'casino'} (${result.id || 'unknown id'}).`);
-}
-
 async function registerGuildCasino(client) {
   const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
-  if (!guildId) return;
+  if (!guildId) {
+    console.warn('DISCORD_GUILD_ID is missing: /casino cannot be registered.');
+    return;
+  }
   try {
     const guild = await client.guilds.fetch(guildId);
     const commands = await guild.commands.fetch();
     const existing = [...commands.values()].find(command => command.name === 'casino' && command.type === 1);
     if (existing) {
       await guild.commands.edit(existing.id, casinoCommand);
-      console.log('Updated guild /casino launcher.');
+      console.log('Updated guild /casino Activity launcher.');
     } else {
       await guild.commands.create(casinoCommand);
-      console.log('Registered guild /casino launcher.');
+      console.log('Registered guild /casino Activity launcher.');
     }
   } catch (error) {
-    console.error('Could not register guild /casino launcher:', error?.message || error);
+    console.error('Could not register /casino:', error?.message || error);
   }
 }
 
 export async function startAdminBot(token, grantCoins, rainService) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  const originalGuildFetch = client.guilds.fetch.bind(client.guilds);
-  client.guilds.fetch = (...args) => {
-    if (!client.isReady()) return Promise.reject(new Error('Discord bot is still connecting.'));
-    return originalGuildFetch(...args);
-  };
-
   client.on('interactionCreate', interaction => {
-    handleCasino(interaction).catch(() => console.error('Casino launch interaction failed.'));
+    handleCasino(interaction).catch(error => console.error('Casino launch interaction failed:', error?.message || error));
     handleAdmin(interaction, grantCoins).catch(() => console.error('Admin interaction response failed. Check bot connectivity.'));
     if (rainService) handleRain(interaction, rainService).catch(() => console.error('Rain interaction response failed.'));
   });
@@ -173,9 +138,6 @@ export async function startAdminBot(token, grantCoins, rainService) {
   client.login(token).then(async () => {
     console.log('Admin bot connected.');
     await registerGuildCasino(client);
-    await registerCasinoEntryPoint(client, token).catch(error => {
-      console.error('Could not register global /casino Activity entry point:', error?.message || error);
-    });
     if (client.user.username !== 'Spin Empire') {
       try { await client.user.setUsername('Spin Empire'); }
       catch { console.warn('Could not rename the bot to Spin Empire. Set its username in the Discord Developer Portal.'); }
