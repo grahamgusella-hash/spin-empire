@@ -84,9 +84,19 @@ export async function handleCasino(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'casino') return;
   try {
     const response = await interaction.launchActivity({ withResponse: true });
-    const instanceId = response?.resource?.activityInstance?.id || response?.interaction?.activityInstanceId || '';
+    const instanceId =
+      response?.resource?.activityInstance?.id ||
+      response?.resource?.activityInstance?.instanceId ||
+      response?.interaction?.activityInstanceId ||
+      response?.interaction?.activity_instance_id ||
+      response?.activityInstanceId ||
+      '';
+
     if (!rememberActivityLaunch(instanceId, interaction)) {
-      console.error('Spin Empire launched but Discord did not return an Activity instance ID.');
+      console.error('Spin Empire launched but no Activity instance ID was found in the callback response.');
+      console.error('Launch response keys:', Object.keys(response || {}));
+      console.error('Launch resource keys:', Object.keys(response?.resource || {}));
+      console.error('Launch interaction keys:', Object.keys(response?.interaction || {}));
     } else {
       console.log(`Bound Activity instance ${instanceId} to Discord user ${interaction.user.id}.`);
     }
@@ -94,7 +104,7 @@ export async function handleCasino(interaction) {
     console.error('Could not launch Spin Empire from /casino:', error?.message || error);
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: 'Spin Empire could not launch from /casino. Try the App Launcher while this command refreshes.',
+        content: 'Spin Empire could not launch from /casino. Try again in a moment.',
         flags: MessageFlags.Ephemeral
       }).catch(() => {});
     }
