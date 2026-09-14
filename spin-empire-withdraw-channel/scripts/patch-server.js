@@ -19,28 +19,40 @@ source = source.replace(
 );
 source = source.replace("import nodeFetch from 'node-fetch';\n", '');
 
-const oldPingStart = source.indexOf("app.post('/api/login-ping'");
-if (oldPingStart !== -1) {
-  const oldPingEnd = source.indexOf("app.post('/api/token'", oldPingStart);
-  if (oldPingEnd === -1) throw new Error('Could not locate login-ping route boundary.');
-  source = source.slice(0, oldPingStart) + source.slice(oldPingEnd);
+for (const routeName of ["app.post('/api/login-ping'", "app.get('/api/activity-login'"]) {
+  const start = source.indexOf(routeName);
+  if (start !== -1) {
+    const nextRouteCandidates = [
+      source.indexOf("app.post('/api/token'", start + 1),
+      source.indexOf("app.get('/api/community'", start + 1)
+    ].filter(i => i !== -1);
+    const end = Math.min(...nextRouteCandidates);
+    source = source.slice(0, start) + source.slice(end);
+  }
 }
 
-const routeStart = source.indexOf("app.post('/api/token'");
-const routeEnd = source.indexOf("app.get('/api/community'", routeStart);
-if (routeStart === -1 || routeEnd === -1) throw new Error('Could not locate login route boundaries.');
+const tokenStart = source.indexOf("app.post('/api/token'");
+if (tokenStart !== -1) {
+  const tokenEnd = source.indexOf("app.get('/api/community'", tokenStart);
+  if (tokenEnd === -1) throw new Error('Could not locate token route boundary.');
+  source = source.slice(0, tokenStart) + source.slice(tokenEnd);
+}
 
-const loginRoute = `app.post('/api/login-ping', (req, res) => {
+const insertAt = source.indexOf("app.get('/api/community'");
+if (insertAt === -1) throw new Error('Could not locate API insertion point.');
+
+const loginRoute = `app.get('/api/activity-login', (req, res) => {
   res.set('Cache-Control', 'no-store');
+  const instanceId = String(req.query?.instanceId || '');
+  const guildId = String(req.query?.guildId || '');
+  console.log('Activity login GET received:', instanceId, guildId);
   try {
-    const instanceId = String(req.body?.instanceId || '');
-    const guildId = String(req.body?.guildId || '');
-    if (!instanceId) return res.status(400).json({ ok:false, marker:'server-1912', error:'Activity instance ID is missing. Close Spin Empire and run /casino again.' });
+    if (!instanceId) return res.status(400).json({ ok:false, marker:'server-1920', error:'Activity instance ID is missing. Close Spin Empire and run /casino again.' });
 
     const launch = consumeActivityLaunch(instanceId, guildId);
     if (!launch) {
       console.error('No pending /casino launch matched Activity instance/guild:', instanceId, guildId);
-      return res.status(401).json({ ok:false, marker:'server-1912', error:'No recent /casino launch matched this Activity. Close Spin Empire and run /casino again.' });
+      return res.status(401).json({ ok:false, marker:'server-1920', error:'No recent /casino launch matched this Activity. Close Spin Empire and run /casino again.' });
     }
 
     const user = ensureUser(launch.user);
@@ -48,9 +60,10 @@ const loginRoute = `app.post('/api/login-ping', (req, res) => {
     sessions.set(session, user.id);
     setTimeout(() => sessions.delete(session), 12 * 60 * 60 * 1000).unref();
     const now = Date.now();
+    console.log('Activity login verified for Discord user', user.id);
     return res.json({
       ok:true,
-      marker:'server-1912',
+      marker:'server-1920',
       session,
       user: cleanUser(user),
       guildId: launch.guildId,
@@ -58,20 +71,22 @@ const loginRoute = `app.post('/api/login-ping', (req, res) => {
     });
   } catch (error) {
     console.error('Activity launch login failed:', error?.message || error);
-    return res.status(500).json({ ok:false, marker:'server-1912', error:'Spin Empire login failed: ' + (error?.message || 'unknown error') });
+    return res.status(500).json({ ok:false, marker:'server-1920', error:'Spin Empire login failed: ' + (error?.message || 'unknown error') });
   }
 });
 
-// Kept only for compatibility with old cached Activity bundles.
-app.post('/api/token', (req, res) => res.status(410).json({ error:'This Spin Empire build is outdated. Close the Activity and launch /casino again.' }));
+// Old POST routes are intentionally retired so the Activity uses a simple GET that
+// bypasses request-body parsing through Discord's Activity proxy.
+app.post('/api/login-ping', (req,res) => res.status(410).json({ error:'Outdated Activity build. Close Spin Empire and run /casino again.' }));
+app.post('/api/token', (req,res) => res.status(410).json({ error:'Outdated Activity build. Close Spin Empire and run /casino again.' }));
 
 `;
 
-source = source.slice(0, routeStart) + loginRoute + source.slice(routeEnd);
+source = source.slice(0, insertAt) + loginRoute + source.slice(insertAt);
 
-if (!source.includes('consumeActivityLaunch(instanceId, guildId)')) throw new Error('Activity launch verifier was not applied.');
-if (!source.includes("marker:'server-1912'")) throw new Error('Server marker update was not applied.');
-if (!source.includes("app.post('/api/login-ping'")) throw new Error('Combined login route was not applied.');
+if (!source.includes("app.get('/api/activity-login'")) throw new Error('GET Activity login route was not applied.');
+if (!source.includes("marker:'server-1920'")) throw new Error('Server marker update was not applied.');
+if (!source.includes("req.query?.instanceId")) throw new Error('Query-string Activity login was not applied.');
 
 fs.writeFileSync(serverPath, source);
-console.log('Patched server to authenticate through the working login-ping route (server-1912).');
+console.log('Patched server to use GET Activity verification (server-1920).');
